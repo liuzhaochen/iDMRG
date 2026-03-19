@@ -1,20 +1,56 @@
 #calculate left and right canonical form
+function central_site_problem(psi::MPS, P::myMPO)
+    #calculate the Lambda
+    #first, construct the effective H
+    #psi is used to find the correct indices
+    N = P.nunitcell
+    Nf = Int(N / 2)
+    # PH = P.L0 * P.R0
+    lind = commonind(psi[1], P.L0)
+    rind = commonind(psi[N], P.R0)
+    lambda = random_itensor(lind, rind)
+    # @show lind,rind
+
+    lind, rind = mpo_env_linkinds(psi, P)
+    delta_ten = delta(dag(lind), dag(rind))
+
+    # central_product(lambda, delta_ten, P)
+    vals, vecs = eigsolve(
+        x -> central_product(x, delta_ten, P),
+        lambda,
+        1,
+        :SR;
+        ishermitian=true,
+        tol=1e-10,
+        krylovdim=20,
+        maxiter=1,
+        verbosity=0
+    )
+    return vals[1], vecs[1]
+end
+function pseudo_inverse(lambda)
+    lambda = copy(lambda)
+    lam_dim = size(lambda, 1)
+    for i in 1:lam_dim
+        lambda[i, i] = inv(lambda[i, i])
+    end
+    return lambda
+end
 function mixedForm(psi0::MPS, lambda0, lambda_l, lambda_r)
     psi = copy(psi0)
-    lambda = copy(lambda0)
+    # lambda = copy(lambda0)
     Nsite = length(psi0)
     #far left and far right indices
     site_inds = isiteinds(psi)
     lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
     #inverse matrix
-    lam_dim = size(lambda, 1)
-    for i in 1:lam_dim
-        lambda[i, i] = inv(lambda[i, i])
-    end
-    psi[Nsite] = psi[Nsite] * dag(lambda)
+    # lam_dim = size(lambda, 1)
+    # for i in 1:lam_dim
+    #     lambda[i, i] = inv(lambda[i, i])
+    # end
+    # psi[Nsite] = psi[Nsite] * dag(lambda)
     #change indices back to original
-    @show rind
     replaceind!(psi[Nsite], dag(lind), rind)
     #multiply the left and right L tensor
     psi[1] = psi[1] * lambda_l
@@ -29,7 +65,6 @@ function normalizeIMPS(psi0::MPS, lambda0::ITensor)
     #far left and far right indices
     site_inds = isiteinds(psi)
     lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
-    rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
     #inverse matrix
     lam_dim = size(lambda, 1)
     for i in 1:lam_dim
@@ -37,29 +72,49 @@ function normalizeIMPS(psi0::MPS, lambda0::ITensor)
     end
     #update the far right tensor
     psi[Nsite] = psi[Nsite] * dag(lambda)
+    new_lind = settags(new_ind(lind), tags(lind))
+    replaceind!(psi[Nsite], dag(lind), new_lind)
+    rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
     #change indices back to original
-    replaceind!(psi[Nsite], dag(lind), rind)
+    # replaceind!(psi[Nsite], dag(lind), rind)
     #then solve the norm of transfer matix
-    TM = ITensor(1.0)
-    for i in 1:Nsite
-        TM *= psi[i] * dag(prime(psi[i], !site_inds[i]))
-    end
+    # TM = ITensor(1.0)
+    # for i in 1:Nsite
+    #     TM *= psi[i] * dag(prime(psi[i], !site_inds[i]))
+    # end
     #solve eigenvlaue problem
-    eig, vec = eigen(TM, [lind, prime(dag(lind))], [rind, prime(dag(rind))])
+    #instead of full decomposition
+    #use eigensolve instead
+    # eig, vec = eigen(TM, [lind, prime(dag(lind))], [rind, prime(dag(rind))])
     # @show L * delta(dag(rind), prime(rind))
-    eta = 0
-    for i in 1:size(eig, 1)
-        if norm(eig[i, i]) > eta
-            eta = abs(eig[i, i])
+    # eta = 0
+    # for i in 1:size(eig, 1)
+    #     if norm(eig[i, i]) > eta
+    #         eta = abs(eig[i, i])
+    #     end
+    # end
+    ini_eig = random_itensor(dag(lind), prime(lind))
+    function product(x)
+        #sequential apply transfer matrix to vector
+        for i in 1:Nsite
+            x *= psi[i] * dag(prime(psi[i], !site_inds[i]))
         end
+        # TMx = TM * x
+        #replace indices
+        replaceind!(x, rind, dag(lind))
+        replaceind!(x, prime(dag(rind)), prime(lind))
+        return x
     end
-    norm_psi_site = (eta)^(1 / (2Nsite))
+    eig, vec = eigsolve(x -> product(x), ini_eig, 1, :LM; tol=1e-10, krylovdim=20, maxiter=4, verbosity=0)
+    @show eig[1]
+    norm_psi_site = (abs(eig[1]))^(1 / (2Nsite))
     for i in 1:Nsite
         psi[i] *= 1 / norm_psi_site
     end
+
     return psi
 end
-function left_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
+function left_canonical(psi0::MPS, lambda0::ITensor; nsweeps=80)
     psi = copy(psi0)
     lambda = copy(lambda0)
     Nsite = length(psi0)
@@ -79,8 +134,8 @@ function left_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
     #first we need to solve the spectrum of psi to renormalize it
     #initial matrix
     pl = prime(lind)
-    L_ini = random_itensor(pl, dag(lind))
-    #sweep from left to right
+    # L_ini = random_itensor(pl, dag(lind))
+    L_ini = delta(pl, dag(lind))
     for i in 1:nsweeps
         #perform qr for L*psi
         L0 = L_ini
@@ -94,6 +149,7 @@ function left_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
                 ltags = tags(rind)
             end
             Q, L_ini = factorize(A, linds; tags=ltags, ortho="left", which_decomp="qr")
+            #construct transfer matrix for arnoldi step
             # psi[b] = U
             # psi[poi] = V * B
             if i == nsweeps
@@ -105,16 +161,15 @@ function left_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
         end
         #for next round calculation, we need to shift the indices
         replaceind!(L_ini, rind, dag(lind))
+        #according to ref, we could do a arnoldi step to improve the L_ini
+        # vals, vecs = eigsolve(x->TM*x,)
+
         #replace indics for future usage
         lind0 = setdiff(inds(L_ini), [dag(lind)])[1]
         # replaceind!(L_ini, lind, pl)
         pl = uniqueind(L0, L_ini)
         da = delta(lind0, dag(pl)) * L0
         inner = (dag(L_ini)*da)[]
-        if inner < 0
-            L_ini *= -1
-            psi[end] *= -1
-        end
         err = abs(inner) - 1.0
         if i > nsweeps - 10
             @show i, err
@@ -124,7 +179,7 @@ function left_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
     return psi, L_ini
 end
 
-function right_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
+function right_canonical(psi0::MPS, lambda0::ITensor; nsweeps=80)
     psi = copy(psi0)
     lambda = copy(lambda0)
     Nsite = length(psi0)
@@ -143,7 +198,7 @@ function right_canonical(psi0::MPS, lambda0::ITensor; nsweeps=30)
     # replaceind!(psi[Nsite], dag(lind), rind)
     #initial matrix
     pr = prime(rind)
-    L_ini = random_itensor(dag(rind), pr)
+    L_ini = delta(dag(rind), pr)
     #sweep from left to right
     for i in 1:nsweeps
         #perform qr for L*psi
@@ -210,7 +265,7 @@ function initializeMPOLeft(psi, lambda0, H_start::MPO, mpo::myMPO; nsweeps=10)
         count += 1
     end
     #normalize the L using effective system size to avoid the problem of jordan-block
-    L /= sqrt(2N_start_size)
+    # L /= sqrt(2N_start_size)
     #now contract the bulk MPO
     #mpo far left and right link indices
     L_linkind = setdiff(inds(L), [dag(lind), prime(lind)])[1]
@@ -239,7 +294,7 @@ function initializeMPOLeft(psi, lambda0, H_start::MPO, mpo::myMPO; nsweeps=10)
         end
         replaceind!(L, mpo_rind, dag(mpo_lind))
         #renormalize the L 
-        L *= sqrt(current_length) / sqrt(current_length + 2Nsite)
+        # L *= sqrt(current_length) / sqrt(current_length + 2Nsite)
         current_length += 2Nsite
     end
     #align hbulk inds
@@ -286,7 +341,7 @@ function initializeMPORight(psi, lambda0, H_start::MPO, mpo::myMPO; nsweeps=10)
         count -= 1
     end
     #normalize the L using effective system size to avoid the problem of jordan-block
-    L /= sqrt(2N_start_size)
+    # L /= sqrt(2N_start_size)
     #now contract the bulk MPO
     #mpo far left and right link indices
     L_linkind = setdiff(inds(L), [dag(rind), prime(rind)])[1]
@@ -315,9 +370,57 @@ function initializeMPORight(psi, lambda0, H_start::MPO, mpo::myMPO; nsweeps=10)
         end
         replaceind!(L, mpo_lind, dag(mpo_rind))
         #renormalize the L 
-        L *= sqrt(current_length) / sqrt(current_length + 2Nsite)
+        # L *= sqrt(current_length) / sqrt(current_length + 2Nsite)
         current_length += 2Nsite
     end
     mpo.R0 = L
     return lambda, current_length
+end
+function energyMPOSubtractionInI(H, en_density)
+    #substract the energy density in current mpo hamilonian
+    #for ITensor, the local term is in W[end, 1, :, :]
+    Nsite = length(H)
+    site_mpo = isiteinds(H)
+    pmpo_sind = prime.(site_mpo)
+    for i in 1:Nsite
+        lind = i != 1 ? commonind(H[i], H[i-1]) : nothing
+        rind = i != Nsite ? commonind(H[i], H[i+1]) : nothing
+        sind = site_mpo[i]
+        dsind = dag(sind)
+        psind = prime(sind)
+        left_dim = isnothing(lind) ? 1 : dim(lind)
+        for s in 1:dim(sind) #site indices
+            if i == 1
+                H[i][rind=>1, dsind=>s, psind=>s] += -en_density
+            elseif i == Nsite
+                H[i][lind=>left_dim, dsind=>s, psind=>s] += -en_density
+            else
+                H[i][lind=>left_dim, rind=>1, dsind=>s, psind=>s] += -en_density
+            end
+        end
+    end
+    return nothing
+end
+
+function energyMPOSubtraction!(mpo::myMPO, en_density)
+    #substract the energy density in current mpo hamilonian
+    #for ITensor, the local term is in W[end, 1, :, :]
+    Nsite = length(mpo)
+    site_mpo = isiteinds(mpo.H)
+    pmpo_sind = prime.(site_mpo)
+    mpo_lind = setdiff(uniqueinds(mpo.H[1], mpo.H[2]), [dag(site_mpo[1]), pmpo_sind[1]])[1]
+    mpo_rind = setdiff(uniqueinds(mpo.H[end], mpo.H[end-1]), [dag(site_mpo[end]), pmpo_sind[end]])[1]
+    for i in 1:Nsite
+        lind = i != 1 ? commonind(mpo.H[i], mpo.H[i-1]) : mpo_lind
+        rind = i != Nsite ? commonind(mpo.H[i], mpo.H[i+1]) : mpo_rind
+        sind = site_mpo[i]
+        dsind = dag(sind)
+        psind = prime(sind)
+        left_dim = dim(lind)
+        for s in 1:dim(sind) #site indices
+            mpo.H[i][lind=>left_dim, rind=>1, dsind=>s, psind=>s] += -en_density
+            # @show mpo.H[i][lind=>left_dim, rind=>1, dsind=>s,psind=>s ]        
+        end
+    end
+    return nothing
 end
