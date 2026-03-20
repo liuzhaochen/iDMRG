@@ -118,6 +118,44 @@ function new_site_inds(sites_odd)
     sites_new = siteinds(phy, N, conserve_qns=withqn)
     return sites_new
 end
+function initializeHam(h::MPO, Nuc, sites_uc; site_start=1, ham_uc=1)
+    #find a way to update the hamiltonian indices
+    #first find the far left and far right indices
+    #construct the bulk mpo by extracting the finite size MPO
+    h0 = MPO(Nuc)
+    #the bulk mpo should be uniform
+    N = length(h)
+    site_end = ham_uc + site_start - 1
+    uniform_mpo = MPO(ham_uc)
+    for i in 1:ham_uc
+        uniform_mpo[i] = copy(h[site_start+i-1])
+    end
+    len_uni_mpo = length(uniform_mpo)
+    link = commonind(uniform_mpo[1], h[site_start-1])
+    rink = commonind(uniform_mpo[len_uni_mpo], h[site_end+1])
+    #
+    id = 1
+    for i in 1:Nuc
+        h0[i] = copy(uniform_mpo[id])
+        id += 1
+        if id == ham_uc + 1
+            #modify rink
+            # if i != Nuc
+            nlink = settags(new_ind(link), "link,l=$i")
+            replaceind!(h0[i], rink, dag(nlink))
+            replaceind!(uniform_mpo[1], link, nlink)
+            link = nlink
+            # end
+            id = 1
+        end
+    end
+    for i in 1:Nuc
+        site_ids = isiteinds(h0[i:i])[1]
+        replaceind!(h0[i], dag(site_ids), dag(sites_uc[i]))
+        replaceind!(h0[i], prime(site_ids), prime(sites_uc[i]))
+    end
+    return h0
+end
 function insert_sites!(sites_odd, sites_new, psi::MPS, P::myMPO)
     H_bulk = P.H
     N = length(H_bulk)
@@ -240,56 +278,81 @@ function isiteinds(psi)
     return unique(idx)
 end
 include("canonical_form.jl")
-function restartDMRG(H_odd, H_bulk, psi, lambda, energy; nsweeps, maxdim, cutoff)
-    Nt = length(H_bulk)
-    mpo = myMPO(0, 0, Nt + 1, 2, Nt, H_bulk, ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nt))
-    sites = isiteinds(H_bulk)
+function iMPO(H_bulk, Nuc::Int)
+    mpo = myMPO(0, 0, Nuc + 1, 2, Nuc, H_bulk,
+        ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nuc))
+    return mpo
+end
+function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10)
+    #no need to find left/right canoncial form if the initial state is produc state
+    #return mixed form psi
+    if isproduct(psi)
+        initializeMPOLeftProduct(psi, H_ini, mpo; nsweeps)
+        initializeMPORightProduct(psi, H_ini, mpo; nsweeps)
+    else
+        # left_canonical(psi)
+        # right_canonical(psi)
+        #first normalize the psi and get left,right L, R matrices
+        psi, L, Linv, R, Rinv = normalizeIMPS(psi)
+        psi_left = left_canonical(L, Linv, psi)
+        @time Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
+        psi_right = right_canonical(R, Rinv, psi)
+        @time initializeMPORight(psi_right, H_ini, mpo; nsweeps)
+        psi = mixedForm(psi, L, R)
+    end
     mpo.niter = 1
-    # right_canonical(psi, lambda)
-    @time psi = normalizeIMPS(psi, lambda)
-    # return nothing
-    @time lambda_l, Nx = initializeMPOLeft(psi, lambda, H_odd, mpo, nsweeps=100)
-    @time lambda_r, _ = initializeMPORight(psi, lambda, H_odd, mpo, nsweeps=100)
-    #need to align H_bulk left and right linds
-    #construct the mixed canonical form
-    # nsweeps = 10
-    # maxdim = [137]
-    # cutoff = [-1.0]
-    psi = mixedForm(psi, lambda, lambda_l, lambda_r)
-    #need S0
+    mpo.lpos = 0
+    mpo.rpos = length(mpo) + 1
+    return psi
+end
+function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
+    Nt = length(mpo)
+    sites = isiteinds(mpo.H)
     #solve central site problem to get S0
+    #for product state as initial state
+    #the enviroment does not have links connect to mps
     vals, S0 = central_site_problem(psi, mpo)
     eng_density = 0
-    nstep = 10
-    for i in 1:nstep
-        eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=5, eigsolve_maxiter=4)
-        eng_density = eng / Nt
-        if i > 1
-            @show i, Nx
-            @show eng_density
+    nstep = 50
+    Nx = Nt
+    #sometimes we may want to reinitialize the mpo
+    len_glob = length(nsteps)
+    for s in 1:len_glob
+        #nsteps = global step
+        nstep = nsteps[s]
+        for i in 1:nstep
+            eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=20, eigsolve_maxiter=1)
+            eng_density = eng / Nt
+            if i > 1
+                @show i, Nx
+                @show eng_density
+            end
+            if i == nstep
+                break
+            end
+            begin
+                ind, S = update_psi!(psi, Nt)
+                energyMPOSubtraction!(mpo, eng_density)
+                update_env!(mpo, mpo.H, psi)
+                energyMPOSubtraction!(mpo, -eng_density)
+                sites_new = new_site_inds(sites)
+                psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
+                insert_sites!(sites, sites_new, psi, mpo)
+                sites = sites_new
+                S0 = S
+                Nx += Nt
+            end
         end
-        if i == nstep
-            break
-        end
-        begin
-            ind, S = update_psi!(psi, Nt)
-            energyMPOSubtraction!(mpo, eng_density)
-            update_env!(mpo, mpo.H, psi)
-            energyMPOSubtraction!(mpo, -eng_density)
-            # mpo.L0 *= sqrt(Nx) / sqrt(Nx + Nt)
-            # mpo.R0 *= sqrt(Nx) / sqrt(Nx + Nt)
-            sites_new = new_site_inds(sites)
-            psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
-            insert_sites!(sites, sites_new, psi, mpo)
-            sites = sites_new
-            S0 = S
-            Nx += Nt
+        # psi, _, _ ,_, _= normalizeIMPS(psi, S0)
+        psi = imps_periodic_form(psi, S0)
+        if s != len_glob
+            psi = initializeIMPO(psi, H_ini, mpo; nsweeps=100)
+            vals, S0 = central_site_problem(psi, mpo)
         end
     end
-    # val, lambda = central_site_problem(psi, mpo)
-    return psi, S0
+    return psi
 end
-function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep=10)
+function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep=50)
     Nt = length(H_bulk)
     mpo = myMPO(0, 0, Nt + 1, 2, Nt, H_bulk, ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nt))
     #substract initial energy
@@ -305,18 +368,23 @@ function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep
 
     #initialize
     ind, S0 = update_psi!(psi, Nt)
-    energyMPOSubtractionInI(H_odd, energy / length(psi0))
+    energyMPOSubtractionInI(H_odd, energy / Nt)
     update_env!(mpo, H_odd, psi)
-    energyMPOSubtractionInI(H_odd, -energy / length(psi0))
+    energyMPOSubtractionInI(H_odd, -energy / Nt)
     sites_new = new_site_inds(sites)
     psi = new_psi!(ind, sites_new, psi, mpo)
+    # @show inds(psi[1])
+    # @show inds(psi[2])
+    # return nothing
     insert_sites!(sites, sites_new, psi, mpo)
     sites = sites_new
     for i in 1:nstep
         eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=5, eigsolve_maxiter=4)
         eng_density = eng / Nt
-        @show i, Nx
-        @show eng_density
+        if i > 1
+            @show i, Nx
+            @show eng_density
+        end
         if i == nstep
             break
         end
@@ -339,39 +407,9 @@ function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep
             Nx += Nt
         end
     end
-    for i in 1:5
-       psi,S0= restartDMRG(H_odd, H_bulk, psi, S0, energy; nsweeps, maxdim, cutoff)
+    nsweeps = 5
+    for i in 1:2
+        psi, S0 = restartDMRG(H_odd, H_bulk, psi, S0, energy; nsweeps, maxdim, cutoff)
     end
     return nothing
-end
-
-let
-    N = 24
-    sites = siteinds("S=1/2", N, conserve_qns=true)
-    os = OpSum()
-    for j = 1:N
-        # os += 0.3, "Sz", j
-    end
-    for j = 1:N-1
-        os += 0.5, "S+", j, "S-", j + 1
-        os += 0.5, "S-", j, "S+", j + 1
-        os += "Sz", j, "Sz", j + 1
-    end
-    H = MPO(os, sites)
-    #perform DMRG first
-    state = [isodd(n) ? "Up" : "Dn" for n = 1:N]
-    psi0 = MPS(sites, state)
-    nsweeps = 10
-    maxdim = [100]
-    cutoff = [1E-10]
-
-    energy, psi = dmrg(H, psi0; nsweeps, maxdim, cutoff)
-    # @show energy / N
-    Nt = 2
-    h0 = MPO(Nt)
-    Ns = Int(N / 2 - Nt / 2)
-    for i in 0:Nt-1
-        h0[i+1] = copy(H[Ns+i])
-    end
-    main(H, h0, sites[Ns:Ns+Nt-1], psi, energy; nsweeps, maxdim, cutoff)
 end
