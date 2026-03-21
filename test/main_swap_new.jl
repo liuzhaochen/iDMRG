@@ -6,7 +6,7 @@ using ITensors
 using ITensorMPS
 using ITensorMPS: AbstractProjMPO
 using ITensorMPS: OneITensor
-using KrylovKit: eigsolve
+using KrylovKit: eigsolve,schursolve, Arnoldi
 mutable struct myMPO <: AbstractProjMPO
     niter::Int
     lpos::Int
@@ -77,22 +77,29 @@ function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi, P::myMPO)
     end
     #replace indices
     psi = psi_new
+    #set current singular value to 1
+    Lambda = pseudo_id(Lambda)
+    Lambda /= norm(Lambda)
     psi[1] = psi[1] * Lambda
     psi[N] = psi[N] * Lambda
     for i in 1:N
         replaceind!(psi[i], sites_old_swap[i], sites_new[i])
     end
-    #need to match the left-most indices
-    # link = commonind(P.L0, psi[1])
-    # rink = commonind(P.R0, psi[N])
-    # @show link
-    # @show rink
-    # replaceind!(P.L0, link, dag(rink))
-    # replaceind!(P.L0, prime(link), prime(dag(rink)))
-    # replaceind!(P.R0, rink, dag(link))
-    # replaceind!(P.R0, prime(rink), prime(dag(link)))
-    #update Lambda
-    psi[Nf] = psi[Nf] * dag(pseudo_inverse(Lambda_odd))
+    #for lambda_old not diagonal we need a better method to find inverse matrix
+    #move 
+    # @show "swap"
+    # if is_diagonal(Lambda_odd)
+    Lambda_odd /= norm(Lambda_odd)
+    psi[Nf] = psi[Nf] * dag((Lambda_odd))
+    # else
+    #     #perform svd inverse
+    #     lind = commonind(dag(Lambda_odd), psi[Nf])
+    #     U, S, V, spec = svd(dag(Lambda_odd), [lind])
+    #     S /= norm(S)
+    #     # S = pseudo_inverse(S)
+    #     psi[Nf] = psi[Nf] * (U * S)
+    #     psi[Nf+1] = psi[Nf+1] * V
+    # end
     return psi
 end
 function central_product(v, delta_ten, P::myMPO)
@@ -209,8 +216,7 @@ function update_psi!(psi0, Nt)
     B = psi0[Nf+1]
     rinds = uniqueinds(A, B)
     ltags = tags(commonind(A, B))
-    Ua, S, V, spec = svd(A, rinds; lefttags=ltags,
-    )
+    Ua, S, V, spec = svd(A, rinds; lefttags=ltags)
     psi0[Nf] = Ua
     lind = commonind(Ua, S)
     lind_new = settags(lind, tags(lind))
@@ -283,22 +289,73 @@ function iMPO(H_bulk, Nuc::Int)
         ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nuc))
     return mpo
 end
-function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10)
+# function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0 = nothing)
+#     #no need to find left/right canoncial form if the initial state is produc state
+#     #return mixed form psi
+#     S0 = ITensor(1.0)
+#     if isproduct(psi)
+#         initializeMPOLeftProduct(psi, H_ini, mpo; nsweeps)
+#         initializeMPORightProduct(psi, H_ini, mpo; nsweeps)
+#     else
+#         # left_canonical(psi)
+#         # right_canonical(psi)
+#         #first normalize the psi and get left,right L, R matrices
+#         psi, L, R = normalizeIMPS(psi)
+#         psi_left, L, l1 = left_canonical(psi)
+#         psi_right, R, l2 = right_canonical(psi)
+#         L_lind = uniqueind(L, psi[1])
+#         L_rind = commonind(L, psi[1])
+#         # S0 = L*R
+#         R_lind = commonind(R, psi[end])
+#         R_rind = uniqueind(R, psi[end])
+#         S0 = L * delta(dag(L_rind), dag(R_lind)) * R
+#         # S0_norm = norm(S0)
+#         # S0_norm = (S0*delta(dag(L_lind), dag(R_rind)))[]
+#         # L /= sqrt(S0_norm)
+#         # R /= sqrt(S0_norm)
+#         #psi_left = L*AAA*Linv
+#         Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
+#         #psi_left = Rinv*AAA*R
+#         initializeMPORight(psi_right, H_ini, mpo; nsweeps)
+#         #central is ...AAA*Linv*L*R*Rinv*AAA...
+#         #need to match indices of L and R
+#         # S0 = L * R
+#         #psi_mix = L*AAA*R
+#         #psi_mix = (AAA)_L *L*R
+#         psi = mixedForm(psi, L, R)
+#     end
+#     mpo.niter = 1
+#     mpo.lpos = 0
+#     mpo.rpos = length(mpo) + 1
+#     return psi, S0
+# end
+
+function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0 = nothing)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
     if isproduct(psi)
         initializeMPOLeftProduct(psi, H_ini, mpo; nsweeps)
         initializeMPORightProduct(psi, H_ini, mpo; nsweeps)
     else
-        # left_canonical(psi)
-        # right_canonical(psi)
-        #first normalize the psi and get left,right L, R matrices
-        psi, L, Linv, R, Rinv = normalizeIMPS(psi)
-        psi_left = left_canonical(L, Linv, psi)
-        @time Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
-        psi_right = right_canonical(R, Rinv, psi)
-        @time initializeMPORight(psi_right, H_ini, mpo; nsweeps)
-        psi = mixedForm(psi, L, R)
+        psi_left = left_canonical_svd(psi, S0)
+        psi_right= right_canonical_svd(psi, S0)
+
+        Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
+        #psi_left = Rinv*AAA*R
+        initializeMPORight(psi_right, H_ini, mpo; nsweeps)
+        Nsite = length(mpo)
+        lind_p = commonind(psi_left[Nsite],mpo.L0)
+        rind_p = commonind(psi_right[1], mpo.R0)
+        #modify the indices of central tensor
+        site_inds = isiteinds(psi)
+        lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
+        rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
+        replaceind!(psi[1], lind, dag(lind_p))
+        replaceind!(psi[Nsite], rind, dag(rind_p))
+        replaceind!(S0, lind, dag(lind_p))
+        replaceind!(S0, rind, dag(rind_p))
+        #accordingly, we should change S0 inds
+        # psi = mixedForm(psi, L, R)
     end
     mpo.niter = 1
     mpo.lpos = 0
@@ -311,7 +368,9 @@ function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
     #solve central site problem to get S0
     #for product state as initial state
     #the enviroment does not have links connect to mps
-    vals, S0 = central_site_problem(psi, mpo)
+    psi = initializeIMPO(psi, H_ini, mpo)
+    S0 = ITensor(1.0)
+    # vals, S0 = central_site_problem(psi, mpo)
     eng_density = 0
     nstep = 50
     Nx = Nt
@@ -339,77 +398,102 @@ function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
                 psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
                 insert_sites!(sites, sites_new, psi, mpo)
                 sites = sites_new
+                if i > 1
+                    lambdamodule(S0, S)
+                end
                 S0 = S
                 Nx += Nt
             end
         end
-        # psi, _, _ ,_, _= normalizeIMPS(psi, S0)
-        psi = imps_periodic_form(psi, S0)
+        # psi = imps_periodic_form(psi, S0)
         if s != len_glob
-            psi = initializeIMPO(psi, H_ini, mpo; nsweeps=100)
-            vals, S0 = central_site_problem(psi, mpo)
+            psi = initializeIMPO(psi, H_ini, mpo; nsweeps=2000, S0 = S0)
+            @show typeof(psi)
+            # vals, S0 = central_site_problem(psi, mpo;lambda=S0)
+            # @show vals
+            #instead of S0 from central problem,
+            #we could use L*R as S0 ?
         end
     end
     return psi
 end
-function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep=50)
-    Nt = length(H_bulk)
-    mpo = myMPO(0, 0, Nt + 1, 2, Nt, H_bulk, ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nt))
-    #substract initial energy
-    energyMPOSubtractionInI(H_odd, energy / length(psi0))
-    #truncate and move the central
-    mpo.niter = 0
-    # nsweeps = 10
-    # maxdim = [137]
-    # cutoff = [-1.0]
-    psi = psi0
-    Nx = length(psi) + Nt
-    eng_density = 0
-
-    #initialize
-    ind, S0 = update_psi!(psi, Nt)
-    energyMPOSubtractionInI(H_odd, energy / Nt)
-    update_env!(mpo, H_odd, psi)
-    energyMPOSubtractionInI(H_odd, -energy / Nt)
-    sites_new = new_site_inds(sites)
-    psi = new_psi!(ind, sites_new, psi, mpo)
-    # @show inds(psi[1])
-    # @show inds(psi[2])
-    # return nothing
-    insert_sites!(sites, sites_new, psi, mpo)
-    sites = sites_new
-    for i in 1:nstep
-        eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=5, eigsolve_maxiter=4)
-        eng_density = eng / Nt
-        if i > 1
-            @show i, Nx
-            @show eng_density
-        end
-        if i == nstep
-            break
-        end
-        begin
-            #substract eng_density from last step and update enviroment
-            sites_new = new_site_inds(sites) #new site indices
-            #make canoncial form
-            _, S = update_psi!(psi, Nt)
-            energyMPOSubtraction!(mpo, eng_density)
-            update_env!(mpo, mpo.H, psi)
-            #undo
-            energyMPOSubtraction!(mpo, -eng_density)
-            #swap the mps and get new one for next round 
-            psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
-            #update the bulk MPO indices
-            insert_sites!(sites, sites_new, psi, mpo)
-            #update indices
-            S0 = S
-            sites = sites_new
-            Nx += Nt
-        end
+function lambdamodule(l1, l2)
+    size1 = size(l1, 1)
+    size2 = size(l2, 1)
+    largel1 = Float64[]
+    largel2 = Float64[]
+    for i = 1:size1
+        push!(largel1, l1[i, i])
     end
-    nsweeps = 5
-    for i in 1:2
-        psi, S0 = restartDMRG(H_odd, H_bulk, psi, S0, energy; nsweeps, maxdim, cutoff)
+    sort!(largel1)
+    for i = 1:size2
+        push!(largel2, l2[i, i])
     end
-    return nothing
+    sort!(largel2)
+    ove = 0
+    for i in 1:min(size1, size2)
+        ove += largel1[i] * largel2[i]
+    end
+    @show ove
 end
+# function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep=50)
+#     Nt = length(H_bulk)
+#     mpo = myMPO(0, 0, Nt + 1, 2, Nt, H_bulk, ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nt))
+#     #substract initial energy
+#     energyMPOSubtractionInI(H_odd, energy / length(psi0))
+#     #truncate and move the central
+#     mpo.niter = 0
+#     # nsweeps = 10
+#     # maxdim = [137]
+#     # cutoff = [-1.0]
+#     psi = psi0
+#     Nx = length(psi) + Nt
+#     eng_density = 0
+
+#     #initialize
+#     ind, S0 = update_psi!(psi, Nt)
+#     energyMPOSubtractionInI(H_odd, energy / Nt)
+#     update_env!(mpo, H_odd, psi)
+#     energyMPOSubtractionInI(H_odd, -energy / Nt)
+#     sites_new = new_site_inds(sites)
+#     psi = new_psi!(ind, sites_new, psi, mpo)
+#     # @show inds(psi[1])
+#     # @show inds(psi[2])
+#     # return nothing
+#     insert_sites!(sites, sites_new, psi, mpo)
+#     sites = sites_new
+#     for i in 1:nstep
+#         eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=5, eigsolve_maxiter=4)
+#         eng_density = eng / Nt
+#         if i > 1
+#             @show i, Nx
+#             @show eng_density
+#         end
+#         if i == nstep
+#             break
+#         end
+#         begin
+#             #substract eng_density from last step and update enviroment
+#             sites_new = new_site_inds(sites) #new site indices
+#             #make canoncial form
+#             _, S = update_psi!(psi, Nt)
+#             energyMPOSubtraction!(mpo, eng_density)
+#             update_env!(mpo, mpo.H, psi)
+#             #undo
+#             energyMPOSubtraction!(mpo, -eng_density)
+#             #swap the mps and get new one for next round 
+#             psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
+#             #update the bulk MPO indices
+#             insert_sites!(sites, sites_new, psi, mpo)
+#             #update indices
+#             S0 = S
+#             sites = sites_new
+#             Nx += Nt
+#         end
+#     end
+#     nsweeps = 5
+#     for i in 1:2
+#         psi, S0 = restartDMRG(H_odd, H_bulk, psi, S0, energy; nsweeps, maxdim, cutoff)
+#     end
+#     return nothing
+# end

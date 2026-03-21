@@ -1,5 +1,5 @@
 #calculate left and right canonical form
-function central_site_problem(psi::MPS, P::myMPO)
+function central_site_problem(psi::MPS, P::myMPO; lambda=nothing)
     #calculate the Lambda
     #first, construct the effective H
     #psi is used to find the correct indices
@@ -11,7 +11,9 @@ function central_site_problem(psi::MPS, P::myMPO)
     if isnothing(lind)
         return 1, ITensor(1.0)
     end
-    lambda = random_itensor(lind, rind)
+    if isnothing(lambda)
+        lambda = random_itensor(lind, rind)
+    end
     # @show lind,rind
 
     lind, rind = mpo_env_linkinds(psi, P)
@@ -24,21 +26,39 @@ function central_site_problem(psi::MPS, P::myMPO)
         1,
         :SR;
         ishermitian=true,
-        tol=1e-10,
+        tol=1e-14,
         krylovdim=20,
         maxiter=1,
         verbosity=0
     )
+
     return vals[1], vecs[1]
 end
 function pseudo_inverse(lambda)
+    cut = 1e-10
+    if lambda == ITensor(1.0)
+    else
+        man = 0.0
+        lambda = copy(lambda)
+        lam_dim = size(lambda, 1)
+        for i in 1:lam_dim
+            val = lambda[i, i]
+            lambda[i, i] = abs(val) > 1e-16 ? inv(lambda[i, i]) : 0
+            # lambda[i, i] = val / (val^2 + cut^2)
+            man = max(man, abs(lambda[i, i]))
+        end
+        @show man
+    end
+    return lambda
+end
+function pseudo_id(lambda)
     if lambda == ITensor(1.0)
     else
         lambda = copy(lambda)
         lam_dim = size(lambda, 1)
         for i in 1:lam_dim
             val = lambda[i, i]
-            lambda[i, i] = abs(val) > 1e-16 ? inv(lambda[i, i]) : 0
+            lambda[i, i] = 1
         end
     end
     return lambda
@@ -63,13 +83,6 @@ function mixedForm(psi0::MPS, lambda_l, lambda_r)
     site_inds = isiteinds(psi)
     lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
-    #inverse matrix
-    # lam_dim = size(lambda, 1)
-    # for i in 1:lam_dim
-    #     lambda[i, i] = inv(lambda[i, i])
-    # end
-    # psi[Nsite] = psi[Nsite] * dag(lambda)
-    #change indices back to original
     replaceind!(psi[Nsite], dag(lind), rind)
     #multiply the left and right L tensor
     psi[1] = psi[1] * lambda_l
@@ -78,18 +91,21 @@ function mixedForm(psi0::MPS, lambda_l, lambda_r)
 end
 function imps_periodic_form(psi0::MPS, lambda0::ITensor)
     #update to periodic form of psi
-
     psi = copy(psi0)
-    lambda = copy(lambda0)
     Nsite = length(psi0)
     #far left and far right indices
     #inverse matrix
-    lam_dim = size(lambda, 1)
-    for i in 1:lam_dim
-        lambda[i, i] = inv(lambda[i, i])
-    end
+    site_inds = isiteinds(psi)
+    lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
+    # @show "pbc"
+    #set current singular value to 1 to avoid inverse
+    lambda = lambda0
+    lambda = pseudo_inverse(lambda)
     #update the far right tensor
+    rind = uniqueind(dag(lambda), psi[Nsite])
     psi[Nsite] = psi[Nsite] * dag(lambda)
+    rnew = settags(new_ind(rind), tags(rind))
+    replaceind!(psi[Nsite], dag(lind), rnew)
     return psi
 end
 function normalizeIMPS(psi0::MPS)
@@ -100,7 +116,6 @@ function normalizeIMPS(psi0::MPS)
     new_lind = settags(new_ind(lind), tags(lind))
     replaceind!(psi[Nsite], dag(lind), new_lind)
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
-    ini_eig = random_itensor(prime(lind), dag(lind))
     function leftproduct(x)
         #sequential apply transfer matrix to vector
         #find the left fixed point
@@ -126,11 +141,11 @@ function normalizeIMPS(psi0::MPS)
         return x
     end
     #left fixed point matrix
-    eig, vec = eigsolve(x -> leftproduct(x), ini_eig, 2, :LM; tol=1e-14, krylovdim=20, maxiter=10, verbosity=0)
-    norm_psi_site = (abs(eig[1]))^(1 / (2Nsite))
-    for i in 1:Nsite
-        psi[i] *= 1 / norm_psi_site
-    end
+    ini_eig = random_itensor(prime(lind), dag(lind))
+    # eig, vec, info = eigsolve(x -> leftproduct(x), ini_eig, 1, :LM; tol=1e-14, krylovdim=20, maxiter=10, verbosity=0)
+    T, vec, eig, info = schursolve(x -> leftproduct(x), ini_eig, 1, :LM, Arnoldi(; tol=1e-16, eager=true))
+    @show info
+    @show eig
     #perform eigen value decouple of vec
     L = vec[1]
     D, U = eigen(L, prime(lind), dag(lind), ishermitian=true)
@@ -139,31 +154,41 @@ function normalizeIMPS(psi0::MPS)
     D = pseudo_sqrt_root(D)
     dl, dr = uniqueind(D, U), commonind(D, U)
     L = noprime(D * dag(U))
-    L_inv = noprime(dag(pseudo_inverse(D)) * U)
-    replaceind!(L_inv, lind, dag(rind))
-    ind = commonind(L_inv, L)
-    new_lind = settags(new_ind(ind), tags(ind))
-    replaceind!(L_inv, ind, new_lind)
+    # @show "L fix"
+    # L_inv = noprime(dag(pseudo_inverse(D)) * U)
+    # replaceind!(L_inv, lind, dag(rind))
+    # ind = commonind(L_inv, L)
+    # new_lind = settags(new_ind(ind), tags(ind))
+    # replaceind!(L_inv, ind, new_lind)
+
     #the left canoncial is L*A...A*L_inv
     #and L is used in mixed representation
 
 
+    norm_psi_site = (abs(eig[1]))^(1 / (2Nsite))
+    @show norm_psi_site
+    for i in 1:Nsite
+        psi[i] *= 1 / norm_psi_site
+    end
     #the right fixed point
     ini_eig = random_itensor(dag(rind), prime(rind))
-    eig, vec = eigsolve(x -> rightproduct(x), ini_eig, 2, :LM; tol=1e-14, krylovdim=20, maxiter=10, verbosity=0)
+    eig, vec = eigsolve(x -> rightproduct(x), ini_eig, 1, :LM; tol=1e-14, krylovdim=20, maxiter=10, verbosity=0)
+    @show eig[1]
     R = vec[1]
     D, U = eigen(R, dag(rind), prime(rind), ishermitian=true)
-    D *= sign(D[1, 1])
+    # D *= sign(D[1, 1])
     D = pseudo_sqrt_root(D)
     dl, dr = uniqueind(D, U), commonind(D, U)
     R = noprime(D * prime(U))
-    R_inv = noprime(dag(pseudo_inverse(D)) * dag(prime(U)))
-    replaceind!(R_inv, rind, dag(lind))
-    ind = commonind(R_inv, R)
-    new_lind = settags(new_ind(ind), tags(ind))
-    replaceind!(R_inv, ind, new_lind)
+    # @show "R fix"
+    # R_inv = noprime(dag(pseudo_inverse(D)) * dag(prime(U)))
+    # replaceind!(R_inv, rind, dag(lind))
+    # ind = commonind(R_inv, R)
+    # new_lind = settags(new_ind(ind), tags(ind))
+    # replaceind!(R_inv, ind, new_lind)
     #the right canoncial is R_inv*A...A*R
-    return psi, L, L_inv, R, R_inv
+    # return psi, L, L_inv, R, R_inv
+    return psi, L, R
 end
 function left_canonical(L, L_inv, psi0::MPS; nsweeps=20)
     psi = copy(psi0)
@@ -180,19 +205,30 @@ function right_canonical(R, R_inv, psi0::MPS; nsweeps=20)
     psi[Nsite] = psi[Nsite] * R
     return psi
 end
-function left_canonical(psi0::MPS; nsweeps=20)
+function left_canonical(psi0::MPS; nsweeps=800, cut=1e-8, L_ini=nothing)
     psi = copy(psi0)
     Nsite = length(psi0)
+    psi_new = MPS(Nsite)
     #far left and far right indices
     site_inds = isiteinds(psi)
     lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
-    @show lind, rind
-    pl = prime(lind)
-    L_ini = delta(pl, dag(lind))
+    # pl = prime(lind)
+    if isnothing(L_ini)
+        pl = settags(new_ind(lind), "link,ltr")
+        # L_ini = random_itensor(ComplexF64,pl, dag(lind))
+        L_ini = delta(pl, dag(lind))
+    else
+        pl = uniqueind(L_ini, psi[1])
+    end
+    L_ini /= norm(L_ini)
+    L0 = L_ini
+    cong = false
+    lambda = 0
+    err = 0
+    #to speed up using one step fixed point solution
     for i in 1:nsweeps
         #perform qr for L*psi
-        L0 = L_ini
         for j in 1:Nsite
             A = L_ini * psi[j]
             if j != Nsite
@@ -202,60 +238,69 @@ function left_canonical(psi0::MPS; nsweeps=20)
                 linds = setdiff(inds(A), [rind])
                 ltags = tags(rind)
             end
-            Q, L_ini = factorize(A, linds; tags=ltags, ortho="left", which_decomp="qr")
-            #construct transfer matrix for arnoldi step
-            # psi[b] = U
-            # psi[poi] = V * B
-            if i == nsweeps
-                psi[j] = Q
+            Q = nothing
+            if j != Nsite
+                Q, L_ini = factorize(A, linds; tags=ltags, which_decomp="qr")
             else
-                #normalize L_ini
-                L_ini /= norm(L_ini)
+                Q, S, L_ini = svd(A, linds)
+                #quantum number shifting
+                b = commonind(S, L_ini)
+                snew = pseudo_id(copy(S))
+                b_new = settags(new_ind(b), tags(b))
+                replaceind!(snew, b, b_new)
+                sdag = dag(snew)
+                #permutator to match the internal indics of quantum number
+                per = permutator(pl, b_new)
+                if cong
+                    pl = settags(new_ind(pl), tags(pl))
+                    per = permutator(pl, b_new)
+                end
+                L_ini = per * sdag * (S * L_ini)
+                # L_ini = sdag * (S * L_ini)
+                Q = Q * snew  * dag(per)
             end
+            if cong
+                psi_new[j] = Q
+            end
+            lambda = norm(L_ini)
+            L_ini /= lambda
         end
-        #for next round calculation, we need to shift the indices
-        i == 1 && @show inds(L_ini)
-        i == 1 && @show array(L_ini)
-        i == 1 && @show flux(L_ini)
         replaceind!(L_ini, rind, dag(lind))
-        #according to ref, we could do a arnoldi step to improve the L_ini
-        # vals, vecs = eigsolve(x->TM*x,)
-
-        #replace indics for future usage
-        lind0 = setdiff(inds(L_ini), [dag(lind)])[1]
-        # replaceind!(L_ini, lind, pl)
-        pl = uniqueind(L0, L_ini)
-        da = delta(lind0, dag(pl)) * L0
-        inner = (dag(L_ini)*da)[]
-        err = abs(inner) - 1.0
-        if i > nsweeps - 10
-            @show i, err
+        if cong || i == nsweeps
+            @show i, err, lambda
+            break
         end
-        # @show commonind(L0, L_ini)
+        err = abs((dag(L_ini)*L0)[]) - 1.0
+        if abs(err) < cut || i==nsweeps-1
+            cong = true
+        end
+        L0 = L_ini
     end
-    return psi, L_ini
+    #match L_ini indices
+    return psi_new, L_ini, lambda
 end
 
-function right_canonical(psi0::MPS; nsweeps=20)
+function right_canonical(psi0::MPS; nsweeps=200, cut=1e-7, L_ini=nothing)
     psi = copy(psi0)
     Nsite = length(psi0)
+    psi_new = MPS(Nsite)
     #far left and far right indices
     site_inds = isiteinds(psi)
     lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
-    #inverse matrix
-    # lam_dim = size(lambda, 1)
-    # for i in 1:lam_dim
-    #     lambda[i, i] = inv(lambda[i, i])
-    # end
-    # #update the far right tensor
-    # psi[Nsite] = psi[Nsite] * dag(lambda)
-    # #change indices back to original
-    # replaceind!(psi[Nsite], dag(lind), rind)
-    #initial matrix
-    pr = prime(rind)
-    L_ini = delta(dag(rind), pr)
+    if isnothing(L_ini)
+        pr = settags(new_ind(rind), "link,rtr")
+        L_ini = random_itensor(ComplexF64, dag(rind), pr)
+    else
+        pr = uniqueind(L_ini, psi[Nsite])
+    end
     #sweep from left to right
+    L_ini = L_ini / norm(L_ini)
+    L0 = L_ini
+    err = 0
+    cong = false
+    lambda = 0
+    err = 0
     for i in 1:nsweeps
         #perform qr for L*psi
         for j in Nsite:-1:1
@@ -267,22 +312,45 @@ function right_canonical(psi0::MPS; nsweeps=20)
                 linds = setdiff(inds(A), [lind])
                 ltags = tags(lind)
             end
-            Q, L_ini = factorize(A, linds; tags=ltags, ortho="left", which_decomp="qr")
-            # psi[b] = U
-            # psi[poi] = V * B
-            if i == nsweeps
-                psi[j] = Q
+            if j != 1
+                Q, L_ini = factorize(A, linds; tags=ltags, ortho="left", which_decomp="qr")
             else
-                #normalize L_ini
-                L_ini /= norm(L_ini)
+                Q, S, L_ini = svd(A, linds)
+                #now play the S
+                #replace S by identity
+                b = commonind(S, L_ini)
+                snew = pseudo_id(copy(S))
+                b_new = settags(new_ind(b), tags(b))
+                replaceind!(snew, b, b_new)
+                sdag = dag(snew)
+                per = permutator(pr, b_new)
+                if cong
+                    pr = settags(new_ind(pr), tags(pr))
+                    per = permutator(pr, b_new)
+                end
+                L_ini = sdag * (S * L_ini) * per
+                Q = Q * snew * dag(per)
             end
+            if cong
+                psi_new[j] = Q
+            end
+            lambda = norm(L_ini)
+            L_ini /= lambda
         end
-        #for next round calculation, we need to shift the indices
         replaceind!(L_ini, lind, dag(rind))
+        if cong || i == nsweeps
+            @show i, err, lambda
+            break
+        end
+        err = abs((L0*dag(L_ini))[]) - 1.0
+        L0 = L_ini
+        if abs(err) < cut || i==nsweeps-1
+            cong = true
+        end
     end
-    return psi, L_ini
+    return psi_new, L_ini, lambda
 end
-function initializeMPOLeft(psi_left, H_start::MPO, mpo::myMPO; nsweeps=10)
+function initializeMPOLeft(psi_left, H_start::MPO, mpo::myMPO; nsweeps=100)
     #H_start is the initial finite size MPO
     #used to initialize the enviroment to minic iDMGR growth steps
     # psi_left, lambda = left_canonical(psi)
@@ -344,10 +412,10 @@ function initializeMPOLeft(psi_left, H_start::MPO, mpo::myMPO; nsweeps=10)
             A = psi_left[j]
             L = L * A * mpo.H[j] * dag(prime(A))
         end
-        # if i != nsweeps
-        replaceind!(L, rind, dag(lind))
-        replaceind!(L, dag(prime(rind)), prime(lind))
-        # end
+        if i != nsweeps
+            replaceind!(L, rind, dag(lind))
+            replaceind!(L, dag(prime(rind)), prime(lind))
+        end
         replaceind!(L, mpo_rind, dag(mpo_lind))
         #renormalize the L 
         # L *= sqrt(current_length) / sqrt(current_length + 2Nsite)
@@ -357,7 +425,7 @@ function initializeMPOLeft(psi_left, H_start::MPO, mpo::myMPO; nsweeps=10)
     mpo.L0 = L
     return current_length
 end
-function initializeMPORight(psi_left, H_start::MPO, mpo::myMPO; nsweeps=10)
+function initializeMPORight(psi_left, H_start::MPO, mpo::myMPO; nsweeps=100)
     #H_start is the initial finite size MPO
     #used to initialize the enviroment to minic iDMGR growth steps
     # psi_left, lambda = right_canonical(psi)
@@ -419,10 +487,10 @@ function initializeMPORight(psi_left, H_start::MPO, mpo::myMPO; nsweeps=10)
             A = psi_left[j]
             L = L * A * mpo.H[j] * dag(prime(A))
         end
-        # if i != nsweeps
-        replaceind!(L, lind, dag(rind))
-        replaceind!(L, dag(prime(lind)), prime(rind))
-        # end
+        if i != nsweeps
+            replaceind!(L, lind, dag(rind))
+            replaceind!(L, dag(prime(lind)), prime(rind))
+        end
         replaceind!(L, mpo_lind, dag(mpo_rind))
         #renormalize the L 
         # L *= sqrt(current_length) / sqrt(current_length + 2Nsite)
@@ -606,3 +674,53 @@ function isproduct(psi::MPS)
     end
     return ispro
 end
+function is_diagonal(A::ITensor; atol=1e-14)
+    if A == ITensor(1.0)
+        return true
+    end
+    if order(A) != 2
+        return false # A diagonal matrix must be rank-2
+    end
+    i, j = inds(A)
+    if dim(i) != dim(j)
+        return false # Must be square to be truly diagonal
+    end
+
+    # Create a copy and subtract the diagonal part
+    # Or more simply, iterate and check:
+    for b in 1:dim(i)
+        for c in 1:dim(j)
+            if b != c && abs(A[i=>b, j=>c]) > atol
+                return false
+            end
+        end
+    end
+    return true
+end
+
+
+function permutator(i1::Index, i2::Index)
+    P = ITensor(i1, i2)
+    id1 = 1
+    for b1 in 1:nblocks(i1)
+        q1 = qn(i1, b1)
+        d1 = blockdim(i1, b1)
+        id2 = 1
+        for b2 in 1:nblocks(i2)
+            q2 = qn(i2, b2)
+            d2 = blockdim(i2, b2)
+
+            if q1 == q2
+                if d1 == d2
+                    for j in 1:d1
+                        P[i1=>id1+j-1, i2=>id2+j-1] = 1.0
+                    end
+                end
+            end
+            id2 += d2
+        end
+        id1 += d1
+    end
+    return P
+end
+include("canonical_new.jl")
