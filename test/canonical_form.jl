@@ -257,7 +257,7 @@ function left_canonical(psi0::MPS; nsweeps=800, cut=1e-8, L_ini=nothing)
                 end
                 L_ini = per * sdag * (S * L_ini)
                 # L_ini = sdag * (S * L_ini)
-                Q = Q * snew  * dag(per)
+                Q = Q * snew * dag(per)
             end
             if cong
                 psi_new[j] = Q
@@ -271,7 +271,7 @@ function left_canonical(psi0::MPS; nsweeps=800, cut=1e-8, L_ini=nothing)
             break
         end
         err = abs((dag(L_ini)*L0)[]) - 1.0
-        if abs(err) < cut || i==nsweeps-1
+        if abs(err) < cut || i == nsweeps - 1
             cong = true
         end
         L0 = L_ini
@@ -344,7 +344,7 @@ function right_canonical(psi0::MPS; nsweeps=200, cut=1e-7, L_ini=nothing)
         end
         err = abs((L0*dag(L_ini))[]) - 1.0
         L0 = L_ini
-        if abs(err) < cut || i==nsweeps-1
+        if abs(err) < cut || i == nsweeps - 1
             cong = true
         end
     end
@@ -667,10 +667,13 @@ function initializeMPORightProduct(psi, H_start::MPO, mpo::myMPO; nsweeps=10)
 end
 function isproduct(psi::MPS)
     #check whether the psi has not links between unitcell
-    ind_1 = inds(psi[1])
     ispro = false
-    if length(ind_1) < 3
-        ispro = true
+    N = length(psi)
+    for i in 1:N
+        ind = inds(psi[i])
+        if length(ind) < 3
+            ispro = true
+        end
     end
     return ispro
 end

@@ -6,7 +6,7 @@ using ITensors
 using ITensorMPS
 using ITensorMPS: AbstractProjMPO
 using ITensorMPS: OneITensor
-using KrylovKit: eigsolve,schursolve, Arnoldi
+using KrylovKit: eigsolve, schursolve, Arnoldi
 mutable struct myMPO <: AbstractProjMPO
     niter::Int
     lpos::Int
@@ -17,6 +17,18 @@ mutable struct myMPO <: AbstractProjMPO
     L0::ITensor
     R0::ITensor
     LR::Vector{ITensor}
+end
+function circshift(psi::MPS, shift::Int)
+    N = length(psi)
+    tensor = [psi[i] for i in 1:N]
+    circshift!(tensor, shift)
+    return MPS(tensor)
+end
+function circshift(mpo::MPO, shift::Int)
+    N = length(mpo)
+    tensor = [mpo[i] for i in 1:N]
+    circshift!(tensor, shift)
+    return MPO(tensor)
 end
 function new_ind(id)
     id_new = Index(id.space)
@@ -33,11 +45,12 @@ function ITensorMPS.rproj(P::myMPO)
     (P.rpos >= length(P) + 1) && return P.R0
     return P.LR[P.rpos]
 end
-function update_env!(P::myMPO, H0, psi::MPS)
+function update_env!(poi_swap::Int, P::myMPO, H0, psi::MPS)
     #construct env MPO
     #for initial calculations
     N = length(psi)
-    k = Int(N / 2)
+    # k = Int(N / 2)
+    k = poi_swap
     P.lpos = 0
     P.rpos = N + 1
     ll = 0
@@ -58,48 +71,78 @@ function update_env!(P::myMPO, H0, psi::MPS)
     P.R0 = R
     return nothing
 end
-function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi, P::myMPO)
+function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi, swap_poi::Int, P::myMPO)
     #using the swap MPS method to grow the system
     N = P.nunitcell
-    psi_new = MPS(N)
-    #swap A1,A2,A3,A4,A5,A6
+    sites_old = copy(sites_old)
+    #for swap_poi = 2
+    #swap A1,A2,A3,A4,A5
     #to
-    #A4,A5,A6*Lambda*A1,A2,A3
-    phy = string(collect(tags(sites_old[1]))[1])
-    withqn = hasqns(sites_old[1]) ? true : false
-    sites_old_swap = siteinds(phy, N, conserve_qns=withqn)
-    Nf = Int(N / 2)
-    for i in 1:Int(N / 2)
-        psi_new[i] = psi[Nf+i]
-        psi_new[Nf+i] = psi[i]
-        sites_old_swap[i] = sites_old[Nf+i]
-        sites_old_swap[Nf+i] = sites_old[i]
-    end
+    #A3,A4,A5, A1, A2
+    psi = circshift(psi, -swap_poi)
+    circshift!(sites_old, -swap_poi)
     #replace indices
-    psi = psi_new
     #set current singular value to 1
-    Lambda = pseudo_id(Lambda)
-    Lambda /= norm(Lambda)
+    #instead of inverting the S matrix
+    #using SVD to update left haft
+    #Lambda*A3*A4*A5 S^-1 A1,A2*Lambda
     psi[1] = psi[1] * Lambda
     psi[N] = psi[N] * Lambda
     for i in 1:N
-        replaceind!(psi[i], sites_old_swap[i], sites_new[i])
+        replaceind!(psi[i], sites_old[i], sites_new[i])
     end
-    #for lambda_old not diagonal we need a better method to find inverse matrix
-    #move 
-    # @show "swap"
-    # if is_diagonal(Lambda_odd)
-    Lambda_odd /= norm(Lambda_odd)
-    psi[Nf] = psi[Nf] * dag((Lambda_odd))
-    # else
-    #     #perform svd inverse
-    #     lind = commonind(dag(Lambda_odd), psi[Nf])
-    #     U, S, V, spec = svd(dag(Lambda_odd), [lind])
-    #     S /= norm(S)
-    #     # S = pseudo_inverse(S)
-    #     psi[Nf] = psi[Nf] * (U * S)
-    #     psi[Nf+1] = psi[Nf+1] * V
-    # end
+    #Lambda*A3*A4*A5S^dag = USV
+    #then left part is UV
+    #here A_new = UV≊ A*S^-1
+    #we could define the error as 
+    #norm(A_new*S - A)
+    # 1-inner(A_new*S, A)=1-inner(A_new*S, A)
+    #perform QR
+    site_inds = sites_new
+    if isproduct(psi)
+        return psi
+    end
+    L = ITensor(1.0)
+    Nl = N - swap_poi
+    #far left indices
+    lind = setdiff(uniqueinds(psi[1], psi[2]), [sites_new[1]])[1]#
+    #far right indices
+    rind = commonind(psi[Nl], dag(Lambda_odd))
+    error = ITensor(1.0)
+    for j in 1:Nl
+        if j != Nl
+            A = psi[j] * L
+        else
+            A = psi[j] * L * dag(Lambda_odd)
+        end
+        if j != Nl
+            linds = uniqueinds(A, psi[j+1])
+            ltags = tags(commonind(A, psi[j+1]))
+        else
+            rind = commonind(A, psi[Nl+1])
+            linds = setdiff(inds(A), [rind])
+            ltags = tags(rind)
+        end
+        if j != Nl
+            Q, L = qr(A, linds)
+        else
+            Q, S, L_ini = svd(A, linds)
+            S = pseudo_id(S)
+            #through away the singular matrix
+            Q = Q * S * L_ini
+        end
+        #calculate error 
+        site_id = site_inds[j]
+        if j != Nl
+            # error = error *psi[j] *prime(dag(Q), !site_id)
+            error = error * Q * dag(psi[j])
+        else
+            error = error * Q * Lambda_odd * dag(psi[j])
+        end
+        psi[j] = Q
+    end
+    error = 1 - error[]
+    @show error
     return psi
 end
 function central_product(v, delta_ten, P::myMPO)
@@ -163,9 +206,13 @@ function initializeHam(h::MPO, Nuc, sites_uc; site_start=1, ham_uc=1)
     end
     return h0
 end
-function insert_sites!(sites_odd, sites_new, psi::MPS, P::myMPO)
+function insert_sites!(sites_odd, sites_new, poi_swap, psi::MPS, P::myMPO)
+    #swap the MPO 
+    #such that before ...H5-a-H1,H2-c-H3,H4,H5-b-H1...
+    #is swap to -c-H3,H4,H5-b, a-H1,H2-c
     H_bulk = P.H
     N = length(H_bulk)
+    sites_odd = copy(sites_odd)
     dag_site = dag.(sites_new)
     prim_site = prime.(sites_new)
 
@@ -176,40 +223,31 @@ function insert_sites!(sites_odd, sites_new, psi::MPS, P::myMPO)
     #right most indices
     mpo_link_rind = setdiff(inds(H_bulk[N]), [dag(sites_odd[N]), prime(sites_odd[N]), commonind(H_bulk[N],
         H_bulk[N-1])])[1]
+    #swap
+    P.H = circshift(P.H, -poi_swap)
+    #now modify the link indices make sure mpo can be connected
+    replaceind!(P.H[N-poi_swap], mpo_link_rind, dag(mpo_link_lind))
+    sites_odd = circshift!(sites_odd, -poi_swap)
     for i in 1:N
-        #site index
-        replaceind!(H_bulk[i], dag(sites_odd[i]), dag_site[i])
-        replaceind!(H_bulk[i], prime(sites_odd[i]), prim_site[i])
-        #lind index
-        lind = i == 1 ? mpo_link_lind : commonind(H_bulk[i], H_bulk[i-1])
-        new_lind = new_ind(lind)
-        new_lind = settags(new_lind, "link, l=$(i-1)")
-        replaceind!(H_bulk[i], lind, new_lind)
-
-        if i == 1
-            replaceind!(P.L0, lind0, dag(new_lind))
-        elseif i != 1
-            replaceind!(H_bulk[i-1], dag(lind), dag(new_lind))
-        end
+        replaceind!(P.H[i], dag(sites_odd[i]), dag_site[i])
+        replaceind!(P.H[i], prime(sites_odd[i]), prim_site[i])
     end
-    # lind = uniqueinds(H_bulk[N], H_bulk[N-1])
-    # lind = setdiff(lind, [dag_site[N], prim_site[N]])[1]
-    new_lind = new_ind(mpo_link_rind)
-    new_lind = settags(new_lind, "link, l=$N")
-    replaceind!(H_bulk[N], mpo_link_rind, new_lind)
-    replaceind!(P.R0, rind0, dag(new_lind))
-
-    # P.H = copy(H_bulk)
+    # new_lind = new_ind(mpo_link_rind)
+    # new_lind = settags(new_lind, tags(mpo_link_rind))
+    # replaceind!(H_bulk[N], mpo_link_rind, new_lind)
+    # lind0, rind0 = mpo_env_linkinds(psi, P)
+    # replaceind!(P.R0, rind0, dag(new_lind))
+    #replace site inds
     P.lpos = 0
     P.rpos = N + 1
     P.niter += 1
     return nothing
 end
-function update_psi!(psi0, Nt)
+function update_psi!(swap_poi::Int, psi0, Nt)
     #construct infinite MPS from finite MPS
     #break the bond and modify the incies
     N = length(psi0)
-    Nf = Int(N / 2)
+    Nf = swap_poi
     orthogonalize!(psi0, Nf)
     #get the U,S,V
     A = psi0[Nf]
@@ -289,48 +327,7 @@ function iMPO(H_bulk, Nuc::Int)
         ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nuc))
     return mpo
 end
-# function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0 = nothing)
-#     #no need to find left/right canoncial form if the initial state is produc state
-#     #return mixed form psi
-#     S0 = ITensor(1.0)
-#     if isproduct(psi)
-#         initializeMPOLeftProduct(psi, H_ini, mpo; nsweeps)
-#         initializeMPORightProduct(psi, H_ini, mpo; nsweeps)
-#     else
-#         # left_canonical(psi)
-#         # right_canonical(psi)
-#         #first normalize the psi and get left,right L, R matrices
-#         psi, L, R = normalizeIMPS(psi)
-#         psi_left, L, l1 = left_canonical(psi)
-#         psi_right, R, l2 = right_canonical(psi)
-#         L_lind = uniqueind(L, psi[1])
-#         L_rind = commonind(L, psi[1])
-#         # S0 = L*R
-#         R_lind = commonind(R, psi[end])
-#         R_rind = uniqueind(R, psi[end])
-#         S0 = L * delta(dag(L_rind), dag(R_lind)) * R
-#         # S0_norm = norm(S0)
-#         # S0_norm = (S0*delta(dag(L_lind), dag(R_rind)))[]
-#         # L /= sqrt(S0_norm)
-#         # R /= sqrt(S0_norm)
-#         #psi_left = L*AAA*Linv
-#         Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
-#         #psi_left = Rinv*AAA*R
-#         initializeMPORight(psi_right, H_ini, mpo; nsweeps)
-#         #central is ...AAA*Linv*L*R*Rinv*AAA...
-#         #need to match indices of L and R
-#         # S0 = L * R
-#         #psi_mix = L*AAA*R
-#         #psi_mix = (AAA)_L *L*R
-#         psi = mixedForm(psi, L, R)
-#     end
-#     mpo.niter = 1
-#     mpo.lpos = 0
-#     mpo.rpos = length(mpo) + 1
-#     return psi, S0
-# end
-
-function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0 = nothing)
+function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0=nothing)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
     if isproduct(psi)
@@ -338,13 +335,13 @@ function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0 = nothing)
         initializeMPORightProduct(psi, H_ini, mpo; nsweeps)
     else
         psi_left = left_canonical_svd(psi, S0)
-        psi_right= right_canonical_svd(psi, S0)
+        psi_right = right_canonical_svd(psi, S0)
 
         Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
         #psi_left = Rinv*AAA*R
         initializeMPORight(psi_right, H_ini, mpo; nsweeps)
         Nsite = length(mpo)
-        lind_p = commonind(psi_left[Nsite],mpo.L0)
+        lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
         #modify the indices of central tensor
         site_inds = isiteinds(psi)
@@ -364,6 +361,7 @@ function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0 = nothing)
 end
 function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
     Nt = length(mpo)
+    swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
     sites = isiteinds(mpo.H)
     #solve central site problem to get S0
     #for product state as initial state
@@ -390,14 +388,16 @@ function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
                 break
             end
             begin
-                ind, S = update_psi!(psi, Nt)
+                ind, S = update_psi!(swap_poi, psi, Nt)
                 energyMPOSubtraction!(mpo, eng_density)
-                update_env!(mpo, mpo.H, psi)
+                update_env!(swap_poi, mpo, mpo.H, psi)
                 energyMPOSubtraction!(mpo, -eng_density)
                 sites_new = new_site_inds(sites)
-                psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
-                insert_sites!(sites, sites_new, psi, mpo)
+                psi = swap_mps!(S, S0, sites, sites_new, psi, swap_poi, mpo)
+                insert_sites!(sites, sites_new, swap_poi, psi, mpo)
                 sites = sites_new
+                #update swap poi
+                swap_poi = Nt - swap_poi
                 if i > 1
                     lambdamodule(S0, S)
                 end
@@ -407,12 +407,9 @@ function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
         end
         # psi = imps_periodic_form(psi, S0)
         if s != len_glob
-            psi = initializeIMPO(psi, H_ini, mpo; nsweeps=2000, S0 = S0)
-            @show typeof(psi)
+            psi = initializeIMPO(psi, H_ini, mpo; nsweeps=100, S0=S0)
             # vals, S0 = central_site_problem(psi, mpo;lambda=S0)
             # @show vals
-            #instead of S0 from central problem,
-            #we could use L*R as S0 ?
         end
     end
     return psi
@@ -436,64 +433,3 @@ function lambdamodule(l1, l2)
     end
     @show ove
 end
-# function main(H_odd, H_bulk, sites, psi0, energy; nsweeps, maxdim, cutoff, nstep=50)
-#     Nt = length(H_bulk)
-#     mpo = myMPO(0, 0, Nt + 1, 2, Nt, H_bulk, ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nt))
-#     #substract initial energy
-#     energyMPOSubtractionInI(H_odd, energy / length(psi0))
-#     #truncate and move the central
-#     mpo.niter = 0
-#     # nsweeps = 10
-#     # maxdim = [137]
-#     # cutoff = [-1.0]
-#     psi = psi0
-#     Nx = length(psi) + Nt
-#     eng_density = 0
-
-#     #initialize
-#     ind, S0 = update_psi!(psi, Nt)
-#     energyMPOSubtractionInI(H_odd, energy / Nt)
-#     update_env!(mpo, H_odd, psi)
-#     energyMPOSubtractionInI(H_odd, -energy / Nt)
-#     sites_new = new_site_inds(sites)
-#     psi = new_psi!(ind, sites_new, psi, mpo)
-#     # @show inds(psi[1])
-#     # @show inds(psi[2])
-#     # return nothing
-#     insert_sites!(sites, sites_new, psi, mpo)
-#     sites = sites_new
-#     for i in 1:nstep
-#         eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=5, eigsolve_maxiter=4)
-#         eng_density = eng / Nt
-#         if i > 1
-#             @show i, Nx
-#             @show eng_density
-#         end
-#         if i == nstep
-#             break
-#         end
-#         begin
-#             #substract eng_density from last step and update enviroment
-#             sites_new = new_site_inds(sites) #new site indices
-#             #make canoncial form
-#             _, S = update_psi!(psi, Nt)
-#             energyMPOSubtraction!(mpo, eng_density)
-#             update_env!(mpo, mpo.H, psi)
-#             #undo
-#             energyMPOSubtraction!(mpo, -eng_density)
-#             #swap the mps and get new one for next round 
-#             psi = swap_mps!(S, S0, sites, sites_new, psi, mpo)
-#             #update the bulk MPO indices
-#             insert_sites!(sites, sites_new, psi, mpo)
-#             #update indices
-#             S0 = S
-#             sites = sites_new
-#             Nx += Nt
-#         end
-#     end
-#     nsweeps = 5
-#     for i in 1:2
-#         psi, S0 = restartDMRG(H_odd, H_bulk, psi, S0, energy; nsweeps, maxdim, cutoff)
-#     end
-#     return nothing
-# end
