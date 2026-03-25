@@ -1,0 +1,15 @@
+name = "iDMRG"
+uuid = "0d58c6e6-2796-11f1-adba-bbb4bdad661e"
+version = "0.1.0"
+
+[deps]
+ITensorMPS = "0d1a4710-d33b-49a5-8f18-73bdf49b47e2"
+ITensors = "9136182c-28ba-11e9-034c-db9fb085ebd5"
+KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[compat]
+KrylovKit = "0.10.2"
+LinearAlgebra = "1.12.0"
+Printf = "1.11.0"
