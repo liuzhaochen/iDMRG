@@ -2,10 +2,11 @@
 mutable struct iMPS
     psi::MPS
     S0::ITensor
-    function iMPS(psi::MPS)
-        return new(psi, ITensor(1.0))
-    end
 end
+function iMPS(psi::MPS)
+    return iMPS(psi, ITensor(1.0))
+end
+
 function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi::MPS, swap_poi::Int, P::iMPO)
     #using the swap MPS method to grow the system
     N = P.nunitcell
