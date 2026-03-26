@@ -7,10 +7,11 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         initializeMPOLeftProduct!(psi, H_ini, mpo; nsweeps)
         initializeMPORightProduct!(psi, H_ini, mpo; nsweeps)
     else
-        psi_left = left_canonical_svd(psi, S0)
-        psi_right = right_canonical_svd(psi, S0)
+        psi_left,err_l = left_canonical_svd(psi, S0)
+        psi_right,err_r = right_canonical_svd(psi, S0)
         mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs...)
-
+        err = max(err_l,err_r)
+        @printf "Canoncial Error :%s\n" err
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -22,8 +23,6 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         replaceind!(psi[Nsite], rind, dag(rind_p))
         replaceind!(S0, lind, dag(lind_p))
         replaceind!(S0, rind, dag(rind_p))
-        #accordingly, we should change S0 inds
-        # psi = mixedForm(psi, L, R)
     end
     mpo.niter = 1
     mpo.lpos = 0
@@ -44,16 +43,17 @@ function ITensorMPS.checkdone!(o::local_step_checkdone; kwargs...)
     energy = kwargs[:energy]
     if abs(energy - o.last_energy) / abs(energy) < o.energy_tol
         println("Stopping Local DMRG step after sweep $sw")
+        o.last_energy = 0
         return true
     end
     # Otherwise, update last_energy and keep going
     o.last_energy = energy
     return false
 end
-function ITensorMPS.measure!(o::local_step_checkdone;kwargs...)
+function ITensorMPS.measure!(o::local_step_checkdone; kwargs...)
     return nothing
 end
-function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdim, cutoff,
+function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff,
     eigsolve_krylovdim=10, tol=1e-12, eng_tol=1e-10, obs=nothing)
     Nt = length(mpo)
     swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
@@ -68,7 +68,6 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdim, cutoff
     S = S0
     eng_density = 0
     Nx = Nt
-    len_glob = length(nsteps)
     if isnothing(obs)
         obs = local_step_checkdone(; eng_tol)
     end
@@ -76,17 +75,24 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdim, cutoff
     for s in 1:nstep_max
         #nsteps = global step
         nstep = nsteps[min(s, length(nsteps))]
+        #nstep: number of local steps
+        maxdim = maxdims[min(s, length(maxdims))]
+
+        #solve the central site problem and update bond operator
+        eng_c, S0 = central_site_problem(ipsi.psi, mpo, lambda=S0)
+        #substract environment energy
+        energyMPOSubtraction!(mpo, eng_c / Nt)
+        @printf "======================================\n"
+        @printf "iDMRG global step: %i\n" s
         for i in 1:nstep
             eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs)
-            eng_density = eng / Nt
-            if i > 1
-                overlap = lambdamodule(S0, S)
-                @printf "======================================\n"
-                @printf "iDMRG global step: %i local step %i\n" s i
-                @printf "Energy density: %s\n" eng_density
-                @printf "Bond matrix overlap: %s\n" overlap
-                @printf "=====================================\n"
+            if i == 1
+                #undo environment energy subtract in hamiltonian
+                energyMPOSubtraction!(mpo, -eng_c / Nt)
             end
+            eng_density = (eng + eng_c) / Nt
+            eng_c = 0
+            @printf "Energy density at step (%i,%i): %s\n" s i eng / Nt
             if i == nstep
                 break
             end
@@ -101,14 +107,15 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdim, cutoff
                 sites = sites_new
                 #update swap poi
                 swap_poi = Nt - swap_poi
+                overlap = lambdamodule(S0, S)
                 S0 = S
+                @printf "Bond matrix overlap: %s\n" overlap
+                @printf "------------------------------------\n"
             end
         end
-        if s != len_glob
+        #reinitialize environment
+        if s != nstep_max
             psi = initializeIMPO!(psi, H_ini, mpo; S0, tol)
-            obs.last_energy = 0
-            #solve the central site problem
-            # vals, S0 = central_site_problem(ipsi.psi, mpo)
         end
     end
     ipsi.psi = psi

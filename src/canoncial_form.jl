@@ -18,6 +18,8 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     end
     if isnothing(lambda)
         lambda = random_itensor(lind, rind)
+    else
+        lambda = denseblocks(copy(lambda))
     end
     # @show lind,rind
     function central_product(v)
@@ -26,7 +28,7 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     end
 
     lind, rind = mpo_env_linkinds(psi, P)
-    replaceind!(P.R0, rind, dag(lind)) 
+    replaceind!(P.R0, rind, dag(lind))
     #make sure P.R0 and P.L0 share the same link index
     vals, vecs = eigsolve(
         x -> central_product(x),
@@ -52,16 +54,17 @@ function left_canonical_svd(psi0::MPS, S0::ITensor)
     #far left and far right indices
     site_inds = isiteinds(psi)
     rind = uniqueind(dag(S0), psi[Nsite])
-    psi[Nsite] = psi[Nsite]*dag(S0)
+    psi[Nsite] = psi[Nsite] * dag(S0)
     #replace the right indices of psi[end] back to new one)
     rnew = settags(new_ind(rind), tags(rind))
     replaceind!(psi[Nsite], rind, rnew)
+    S = copy(S0)
+    replaceind!(S, dag(rind), dag(rnew))
 
-    
-    lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
     # pl = prime(lind)
     #the initial transformation matrix
+    error = ITensor(1.0) #error tensor
     L_ini = ITensor(1.0)
     for j in 1:Nsite
         A = L_ini * psi[j]
@@ -75,15 +78,22 @@ function left_canonical_svd(psi0::MPS, S0::ITensor)
         if j != Nsite
             Q, L_ini = factorize(A, linds; tags=ltags, which_decomp="qr")
         else
-            Q, S, L_ini = svd(A, linds)
-            S = pseudo_id(copy(S))
+            Q, Sig, L_ini = svd(A, linds)
+            Sig = pseudo_id(copy(Sig))
             #through away the singular matrix
-            Q = Q * S * L_ini
+            Q = Q * Sig * L_ini
+        end
+        #calculate error 
+        if j != Nsite
+            error = error * Q * dag(psi0[j])
+        else
+            error = error * Q * S * dag(psi0[j])
         end
         psi[j] = Q
     end
     #match L_ini indices
-    return psi
+    error = abs(1 - error[])
+    return psi, error
 end
 function right_canonical_svd(psi0::MPS, S0::ITensor)
     #using one step svd and trough s 
@@ -92,16 +102,18 @@ function right_canonical_svd(psi0::MPS, S0::ITensor)
     #far left and far right indices
     site_inds = isiteinds(psi)
     rind = setdiff(uniqueinds(psi[Nsite], psi[Nsite-1]), site_inds)[1]
-    
+
     lind = uniqueind(dag(S0), psi[1])
-    psi[1] = psi[1]*dag(S0)
+    psi[1] = psi[1] * dag(S0)
     lnew = settags(new_ind(lind), tags(lind))
     replaceind!(psi[1], lind, lnew)
+    S = copy(S0)
+    replaceind!(S, dag(lind), dag(lnew))
 
-    
     lind = setdiff(uniqueinds(psi[1], psi[2]), site_inds)[1]
     #the initial transformation matrix
     L_ini = ITensor(1.0)
+    error = ITensor(1.0)
     for j in Nsite:-1:1
         A = L_ini * psi[j]
         if j != 1
@@ -114,15 +126,20 @@ function right_canonical_svd(psi0::MPS, S0::ITensor)
         if j != 1
             Q, L_ini = factorize(A, linds; tags=ltags, which_decomp="qr")
         else
-            Q, S, L_ini = svd(A, linds)
-            S = pseudo_id(copy(S))
+            Q, Sig, L_ini = svd(A, linds)
+            Sig = pseudo_id(copy(Sig))
             #through away the singular matrix
-            Q = Q * S * L_ini
+            Q = Q * Sig * L_ini
         end
         psi[j] = Q
+        if j != 1
+            error = error * Q * dag(psi0[j])
+        else
+            error = error * Q * S * dag(psi0[j])
+        end
     end
-    #replace the left indices of psi[1] back to new one)
+    error = abs(1 - error[])
     rnew = settags(new_ind(lind), tags(lind))
     replaceind!(psi[1], lind, rnew)
-    return psi
+    return psi, error
 end
