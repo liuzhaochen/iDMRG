@@ -48,7 +48,7 @@ function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi::MPS, swap_poi:
         if j != Nl
             A = psi[j] * L
         else
-            A = psi[j] * L * dag(Lambda_odd)
+            A = (psi[j] * L) * dag(Lambda_odd)
         end
         if j != Nl
             linds = uniqueinds(A, psi[j+1])
@@ -70,9 +70,9 @@ function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi::MPS, swap_poi:
         site_id = site_inds[j]
         if j != Nl
             # error = error *psi[j] *prime(dag(Q), !site_id)
-            error = error * Q * dag(psi[j])
+            error = (error * Q) * dag(psi[j])
         else
-            error = error * Q * Lambda_odd * dag(psi[j])
+            error = ((error * Q) * Lambda_odd) * dag(psi[j])
         end
         psi[j] = Q
     end
