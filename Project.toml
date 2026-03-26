@@ -13,3 +13,6 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 KrylovKit = "0.10.2"
 LinearAlgebra = "1.12.0"
 Printf = "1.11.0"
+
+[extensions]
+iDMRGHDF5Ext = "HDF5"
