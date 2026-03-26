@@ -3,14 +3,13 @@ module iDMRGHDF5Ext
 using HDF5: HDF5, attributes, create_group, open_group, read, write
 using iDMRG: iMPS
 using ITensorMPS: MPS
-using ITensors: ITensor
-
+using ITensors: ITensor, denseblocks
 function HDF5.write(parent::Union{HDF5.File,HDF5.Group}, name::AbstractString, M::iMPS)
     g = create_group(parent, name)
     attributes(g)["type"] = "iMPS"
     attributes(g)["version"] = 1
     write(g, "psi", M.psi)
-    write(g, "S0", M.S0)
+    write(g, "S0", denseblocks(M.S0))
     return nothing
 end
 function HDF5.read(parent::Union{HDF5.File,HDF5.Group}, name::AbstractString, ::Type{iMPS})
