@@ -5,15 +5,15 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
-    
+
     L = L_init
     en_prev = 0.0
-    
+
     for j in 1:max_iter
         # --- Power Iteration  ---
         L_next, en = product_func(L)
         R = L_next - L  # residue
-        
+
         err = abs(en - en_prev) / abs(en)
         if err < tol
             println("Anderson converged at step $j, Energy: $en, err:$err")
@@ -25,16 +25,16 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
         curr_idx = (j - 1) % m + 1
         Ls[curr_idx] = L
         Rs[curr_idx] = R
-        
+
         # update residule matrix
         for i in 1:m
             if isassigned(Rs, i)
                 if i == curr_idx
                     # diagonal
-                    G_cache[i, i] = real((Rs[i] * dag(Rs[i]))[])
+                    G_cache[i, i] = real((Rs[i]*dag(Rs[i]))[])
                 else
                     # off diagonal
-                    val = real((Rs[curr_idx] * dag(Rs[i]))[])
+                    val = real((Rs[curr_idx]*dag(Rs[i]))[])
                     G_cache[curr_idx, i] = val
                     G_cache[i, curr_idx] = val
                 end
@@ -46,7 +46,7 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
         if k_active >= 2
             # subspace
             sub_G = G_cache[1:k_active, 1:k_active]
-            
+
             # (∑α = 1)
             # [ G  -1 ] [ α ] = [ 0 ]
             # [ -1  0 ] [ λ ] = [ -1 ]
@@ -56,15 +56,16 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
             G_ext[k_active+1, 1:k_active] .= -1.0
             #preventing singular matrix
             for i in 1:k_active
-                G_ext[i, i] += 1e-14 * sub_G[i, i] 
+                G_ext[i, i] += 1e-14 * sub_G[i, i]
             end
 
-            rhs = zeros(k_active + 1); rhs[k_active+1] = -1.0
-            
+            rhs = zeros(k_active + 1)
+            rhs[k_active+1] = -1.0
+
             try
                 sol = G_ext \ rhs
                 alpha = sol[1:k_active]
-                
+
                 # new tensor：L_new = ∑ α_i * (L_i + R_i)
                 L_new = alpha[1] * (Ls[1] + Rs[1])
                 for i in 2:k_active
@@ -97,7 +98,7 @@ function left_TMv(L, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_lef
         psi_sind = site_psi[j]
         mpo_sind = site_mpo[j]
         A = psi_left[j]
-        L = L * A * mpo.H[j] * dag(prime(A))
+        L = ((L * A) * mpo.H[j]) * dag(prime(A))
     end
     if replace_inds
         replaceind!(L, rind, dag(lind))
@@ -114,7 +115,7 @@ function right_TMv(L, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_le
         psi_sind = site_psi[j]
         mpo_sind = site_mpo[j]
         A = psi_left[j]
-        L = L * A * mpo.H[j] * dag(prime(A))
+        L = ((L * A) * mpo.H[j]) * dag(prime(A))
     end
     if replace_inds
         replaceind!(L, lind, dag(rind))
@@ -123,7 +124,7 @@ function right_TMv(L, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_le
     replaceind!(L, mpo_lind, dag(mpo_rind))
     return L
 end
-function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO;tol = 1e-12)
+function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12)
     Nuc = length(mpo)
     #initialize the left and right MPO env
     initializeMPOLeft!(psi_left, H_ini, mpo)
@@ -134,7 +135,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     pmpo_sind = prime.(site_mpo)
     mpo_lind = setdiff(uniqueinds(mpo.H[1], mpo.H[2]), [dag(site_mpo[1]), pmpo_sind[1]])[1]
     mpo_rind = setdiff(uniqueinds(mpo.H[end], mpo.H[end-1]), [dag(site_mpo[end]), pmpo_sind[end]])[1]
-   
+
     #################################################
     #
     #             Left Enviroment
@@ -144,10 +145,10 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     site_psi = isiteinds(psi_left)
     lind = setdiff(uniqueinds(psi_left[1], psi_left[2]), site_psi)[1]
     rind = setdiff(uniqueinds(psi_left[end], psi_left[end-1]), site_psi)[1]
-   
+
     b = uniqueind(S0, psi_left[1]) #right indices
     deten = delta(dag(b), prime(b)) #delta tensor to link the far right
-    link_id = commonind(mpo.L0, mpo.H[1]) 
+    link_id = commonind(mpo.L0, mpo.H[1])
     ten_zero = ITensor(dag(link_id)) #on-site tensor to extract energy density
     ten_zero[link_id=>1] = 1
     function lproduct(L; rep=true)

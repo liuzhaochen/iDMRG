@@ -35,7 +35,7 @@ function update_env!(poi_swap::Int, P::iMPO, H0, psi::MPS)
     ll = 0
     L = P.niter > 0 ? P.L0 : OneITensor()
     while ll < k
-        L = L * psi[ll+1] * H0[ll+1] * dag(prime(psi[ll+1]))
+        L = ((L * psi[ll+1]) * H0[ll+1]) * dag(prime(psi[ll+1]))
         ll += 1
     end
     P.L0 = L
@@ -43,7 +43,7 @@ function update_env!(poi_swap::Int, P::iMPO, H0, psi::MPS)
     rl = N + 1
     R = P.niter > 0 ? P.R0 : OneITensor()
     while rl > k + 1
-        R = R * psi[rl-1] * H0[rl-1] * dag(prime(psi[rl-1]))
+        R = ((R * psi[rl-1]) * H0[rl-1]) * dag(prime(psi[rl-1]))
         # @show rl-1
         rl -= 1
     end
@@ -163,8 +163,8 @@ function initializeMPOLeft!(psi_left, H_start::MPO, mpo::iMPO)
         psi_sind = site_psi[count]
         mpo_sind = site_mpo[i]
         A = psi_left[count]
-        L = L * A * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
-                     delta(dag(prime(mpo_sind)), prime(psi_sind))) * dag(prime(A))
+        L = ((L * A) * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
+                        delta(dag(prime(mpo_sind)), prime(psi_sind)))) * dag(prime(A))
         if count == Nsite
             #place rind to lind
             replaceind!(L, rind, dag(lind))
@@ -220,8 +220,8 @@ function initializeMPORight!(psi_left, H_start::MPO, mpo::iMPO)
         psi_sind = site_psi[count]
         mpo_sind = site_mpo[i]
         A = psi_left[count]
-        L = L * A * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
-                     delta(dag(prime(mpo_sind)), prime(psi_sind))) * dag(prime(A))
+        L = ((L * A) * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
+                        delta(dag(prime(mpo_sind)), prime(psi_sind)))) * dag(prime(A))
         if count == 1
             #place rind to lind
             replaceind!(L, lind, dag(rind))
@@ -316,8 +316,8 @@ function initializeMPOLeftProduct!(psi, H_start::MPO, mpo::iMPO; nsweeps=10)
         psi_sind = site_psi[count]
         mpo_sind = site_mpo[i]
         A = psi_left[count]
-        L = L * A * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
-                     delta(dag(prime(mpo_sind)), prime(psi_sind))) * dag(prime(A))
+        L = ((L * A) * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
+                        delta(dag(prime(mpo_sind)), prime(psi_sind)))) * dag(prime(A))
         count += 1
     end
     #normalize the L using effective system size to avoid the problem of jordan-block
@@ -342,7 +342,7 @@ function initializeMPOLeftProduct!(psi, H_start::MPO, mpo::iMPO; nsweeps=10)
             psi_sind = site_psi[j]
             mpo_sind = site_mpo[j]
             A = psi_left[j]
-            L = L * A * mpo.H[j] * dag(prime(A))
+            L = ((L * A) * mpo.H[j]) * dag(prime(A))
         end
         replaceind!(L, mpo_rind, dag(mpo_lind))
         #renormalize the L 
@@ -378,8 +378,8 @@ function initializeMPORightProduct!(psi, H_start::MPO, mpo::iMPO; nsweeps=10)
         psi_sind = site_psi[count]
         mpo_sind = site_mpo[i]
         A = psi_left[count]
-        L = L * A * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
-                     delta(dag(prime(mpo_sind)), prime(psi_sind))) * dag(prime(A))
+        L = ((L * A) * (delta(dag(psi_sind), mpo_sind) * H_start[i] *
+                        delta(dag(prime(mpo_sind)), prime(psi_sind)))) * dag(prime(A))
         count -= 1
     end
     #normalize the L using effective system size to avoid the problem of jordan-block
@@ -400,7 +400,7 @@ function initializeMPORightProduct!(psi, H_start::MPO, mpo::iMPO; nsweeps=10)
             psi_sind = site_psi[j]
             mpo_sind = site_mpo[j]
             A = psi_left[j]
-            L = L * A * mpo.H[j] * dag(prime(A))
+            L = ((L * A) * mpo.H[j]) * dag(prime(A))
         end
         replaceind!(L, mpo_lind, dag(mpo_rind))
         #renormalize the L 
