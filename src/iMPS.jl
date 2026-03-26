@@ -61,10 +61,10 @@ function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi::MPS, swap_poi:
         if j != Nl
             Q, L = qr(A, linds)
         else
-            Q, S, L_ini = svd(A, linds)
+            Q, S, L = svd(A, linds)
             S = pseudo_id(S)
             #through away the singular matrix
-            Q = Q * S * L_ini
+            Q = Q * S * L
         end
         #calculate error 
         site_id = site_inds[j]
@@ -76,6 +76,7 @@ function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi::MPS, swap_poi:
         end
         psi[j] = Q
     end
+    L = nothing
     error = 1 - error[]
     return psi, error
 end

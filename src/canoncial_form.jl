@@ -23,7 +23,7 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     end
     # @show lind,rind
     function central_product(v)
-        Pv = P.L0 * v * P.R0
+        Pv = (P.L0 * v) * P.R0
         return noprime(Pv)
     end
 
@@ -36,9 +36,9 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
         1,
         :SR;
         ishermitian=true,
-        tol=1e-14,
-        krylovdim=20,
-        maxiter=1,
+        tol=1e-12,
+        krylovdim=5,
+        maxiter=4,
         verbosity=0
     )
     #undo
@@ -85,9 +85,9 @@ function left_canonical_svd(psi0::MPS, S0::ITensor)
         end
         #calculate error 
         if j != Nsite
-            error = error * Q * dag(psi0[j])
+            error = (error * Q) * dag(psi0[j])
         else
-            error = error * Q * S * dag(psi0[j])
+            error = ((error * Q) * dag(psi0[j])) * S
         end
         psi[j] = Q
     end
@@ -133,9 +133,9 @@ function right_canonical_svd(psi0::MPS, S0::ITensor)
         end
         psi[j] = Q
         if j != 1
-            error = error * Q * dag(psi0[j])
+            error = (error * Q) * dag(psi0[j])
         else
-            error = error * Q * S * dag(psi0[j])
+            error = ((error * Q) * dag(psi0[j])) * S
         end
     end
     error = abs(1 - error[])

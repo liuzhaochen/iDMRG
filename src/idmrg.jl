@@ -9,7 +9,7 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
     if isproduct(psi)
         initializeMPOLeftProduct!(psi, H_ini, mpo; nsweeps)
         initializeMPORightProduct!(psi, H_ini, mpo; nsweeps)
-        return psi, ITensor(1.0)
+        return psi
     else
         psi_left, err_l = left_canonical_svd(psi, S0)
         psi_right, err_r = right_canonical_svd(psi, S0)
@@ -27,8 +27,11 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         replaceind!(psi[Nsite], rind, dag(rind_p))
         replaceind!(S0, lind, dag(lind_p))
         replaceind!(S0, rind, dag(rind_p))
+        psi_left = nothing
+        psi_right = nothing
+        mpo.LR = Vector{ITensor}(undef, length(mpo))
     end
-    return psi, S0
+    return psi
 end
 mutable struct local_step_checkdone
     #check if the local step converged
@@ -55,7 +58,7 @@ function ITensorMPS.measure!(o::local_step_checkdone; kwargs...)
     return nothing
 end
 function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff,
-    eigsolve_krylovdim=10, tol=1e-12, eng_tol=1e-10, obs=nothing)
+    eigsolve_krylovdim=5, tol=1e-12, eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds = nothing)
     Nt = length(mpo)
     swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
     sites = isiteinds(mpo.H)
@@ -65,7 +68,8 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     psi = ipsi.psi
     H_ini = mpo.H0
 
-    psi, S0 = initializeIMPO!(psi, H_ini, mpo, S0=ipsi.S0)
+    psi = initializeIMPO!(psi, H_ini, mpo, S0=ipsi.S0)
+    S0 = ipsi.S0
     S = S0
     eng_density = 0
     if isnothing(obs)
@@ -86,7 +90,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         @printf "======================================\n"
         @printf "iDMRG global step: %i\n" s
         for i in 1:nstep
-            eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs)
+            eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds)
             if i == 1
                 #undo environment energy subtract in hamiltonian
                 energyMPOSubtraction!(mpo, -eng_c / Nt)
@@ -116,8 +120,9 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         end
         #reinitialize environment
         if s != nstep_max
-            psi, S0 = initializeIMPO!(psi, H_ini, mpo; S0, tol)
+            psi = initializeIMPO!(psi, H_ini, mpo; S0, tol)
         end
+        GC.gc(true)
     end
     ipsi.psi = psi
     ipsi.S0 = S0
