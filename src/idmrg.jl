@@ -3,14 +3,18 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
+    mpo.niter = 1
+    mpo.lpos = 0
+    mpo.rpos = length(mpo) + 1
     if isproduct(psi)
         initializeMPOLeftProduct!(psi, H_ini, mpo; nsweeps)
         initializeMPORightProduct!(psi, H_ini, mpo; nsweeps)
+        return psi, ITensor(1.0)
     else
-        psi_left,err_l = left_canonical_svd(psi, S0)
-        psi_right,err_r = right_canonical_svd(psi, S0)
+        psi_left, err_l = left_canonical_svd(psi, S0)
+        psi_right, err_r = right_canonical_svd(psi, S0)
         mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs...)
-        err = max(err_l,err_r)
+        err = max(err_l, err_r)
         @printf "Canoncial Error :%s\n" err
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
@@ -24,10 +28,7 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         replaceind!(S0, lind, dag(lind_p))
         replaceind!(S0, rind, dag(rind_p))
     end
-    mpo.niter = 1
-    mpo.lpos = 0
-    mpo.rpos = length(mpo) + 1
-    return psi
+    return psi, S0
 end
 mutable struct local_step_checkdone
     #check if the local step converged
@@ -63,11 +64,10 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     #the enviroment does not have links connect to mps
     psi = ipsi.psi
     H_ini = mpo.H0
-    psi = initializeIMPO!(psi, H_ini, mpo)
-    S0 = ipsi.S0
+
+    psi, S0 = initializeIMPO!(psi, H_ini, mpo, S0=ipsi.S0)
     S = S0
     eng_density = 0
-    Nx = Nt
     if isnothing(obs)
         obs = local_step_checkdone(; eng_tol)
     end
@@ -79,7 +79,8 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         maxdim = maxdims[min(s, length(maxdims))]
 
         #solve the central site problem and update bond operator
-        eng_c, S0 = central_site_problem(ipsi.psi, mpo, lambda=S0)
+        eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
+        # eng_c = 0
         #substract environment energy
         energyMPOSubtraction!(mpo, eng_c / Nt)
         @printf "======================================\n"
@@ -115,7 +116,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         end
         #reinitialize environment
         if s != nstep_max
-            psi = initializeIMPO!(psi, H_ini, mpo; S0, tol)
+            psi, S0 = initializeIMPO!(psi, H_ini, mpo; S0, tol)
         end
     end
     ipsi.psi = psi

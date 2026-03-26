@@ -70,21 +70,22 @@ function isiteinds(psi)
     return unique(idx)
 end
 function lambdamodule(l1, l2)
-    size1 = size(l1, 1)
-    size2 = size(l2, 1)
-    largel1 = Float64[]
-    largel2 = Float64[]
-    for i = 1:size1
-        push!(largel1, l1[i, i])
-    end
-    sort!(largel1)
-    for i = 1:size2
-        push!(largel2, l2[i, i])
-    end
-    sort!(largel2)
-    ove = 0
-    for i in 1:min(size1, size2)
-        ove += largel1[i] * largel2[i]
-    end
-    return ove
+    return 0
+    # size1 = size(l1, 1)
+    # size2 = size(l2, 1)
+    # largel1 = Float64[]
+    # largel2 = Float64[]
+    # for i = 1:size1
+    #     push!(largel1, l1[i, i])
+    # end
+    # sort!(largel1)
+    # for i = 1:size2
+    #     push!(largel2, l2[i, i])
+    # end
+    # sort!(largel2)
+    # ove = 0
+    # for i in 1:min(size1, size2)
+    #     ove += largel1[i] * largel2[i]
+    # end
+    # return ove
 end
