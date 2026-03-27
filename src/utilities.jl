@@ -45,11 +45,16 @@ function new_ind(id)
     return id_new
 end
 function new_site_inds(sites_odd)
-    phy = string(collect(tags(sites_odd[1]))[1])
+    # phy = string(collect(tags(sites_odd[1]))[1])
     N = length(sites_odd)
-    withqn = hasqns(sites_odd[1]) ? true : false
+    # withqn = hasqns(sites_odd[1]) ? true : false
 
-    sites_new = siteinds(phy, N, conserve_qns=withqn)
+    # sites_new = siteinds(phy, N, conserve_qns=withqn)
+    sites_new = copy(sites_odd)
+    for i in 1:N
+        id =sites_odd[i] 
+        sites_new[i] = settags(new_ind(id), tags(id))
+    end
     return sites_new
 end
 function isiteinds(psi)
