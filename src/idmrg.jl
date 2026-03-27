@@ -16,6 +16,7 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs...)
         err = max(err_l, err_r)
         @printf "Canoncial Error :%s\n" err
+            flush(stdout)
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -33,7 +34,7 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
     end
     return psi
 end
-mutable struct local_step_checkdone
+mutable struct local_step_checkdone <: ITensorMPS.AbstractObserver 
     #check if the local step converged
     #using energy as reference
     energy_tol::Float64
@@ -47,6 +48,7 @@ function ITensorMPS.checkdone!(o::local_step_checkdone; kwargs...)
     energy = kwargs[:energy]
     if abs(energy - o.last_energy) / abs(energy) < o.energy_tol
         println("Stopping Local DMRG step after sweep $sw")
+            flush(stdout)
         o.last_energy = 0
         return true
     end
@@ -54,11 +56,8 @@ function ITensorMPS.checkdone!(o::local_step_checkdone; kwargs...)
     o.last_energy = energy
     return false
 end
-function ITensorMPS.measure!(o::local_step_checkdone; kwargs...)
-    return nothing
-end
-function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff,
-    eigsolve_krylovdim=5, tol=1e-12, eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds = nothing)
+function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff, observer=NoObserver(),
+    eigsolve_krylovdim=5, tol=1e-12, eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds=nothing)
     Nt = length(mpo)
     swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
     sites = isiteinds(mpo.H)
@@ -76,6 +75,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         obs = local_step_checkdone(; eng_tol)
     end
     #using sweeps system for global steps
+    isdone = false
     for s in 1:nstep_max
         #nsteps = global step
         nstep = nsteps[min(s, length(nsteps))]
@@ -98,9 +98,12 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
             eng_density = (eng + eng_c) / Nt
             eng_c = 0
             @printf "Energy density at step (%i,%i): %s\n" s i eng / Nt
+            flush(stdout)
             if i == nstep
                 break
             end
+            isdone = checkdone!(observer;eng_density, step = (s,i), psi, S0)
+            isdone && break
             begin
                 S = update_psi!(swap_poi, psi)
                 energyMPOSubtraction!(mpo, eng_density)
@@ -112,12 +115,11 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
                 sites = sites_new
                 #update swap poi
                 swap_poi = Nt - swap_poi
-                overlap = lambdamodule(S0, S)
+                # overlap = lambdamodule(S0, S)
                 S0 = S
-                @printf "Bond matrix overlap: %s\n" overlap
-                @printf "------------------------------------\n"
             end
         end
+        isdone && break
         #reinitialize environment
         if s != nstep_max
             psi = initializeIMPO!(psi, H_ini, mpo; S0, tol)
