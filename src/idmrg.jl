@@ -76,6 +76,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     end
     #using sweeps system for global steps
     isdone = false
+    solver = mpo.nsite==1 ? dmrg3SRSVD : dmrg
     for s in 1:nstep_max
         #nsteps = global step
         nstep = nsteps[min(s, length(nsteps))]
@@ -90,7 +91,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         @printf "======================================\n"
         @printf "iDMRG global step: %i\n" s
         for i in 1:nstep
-            eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds)
+            eng, psi = solver(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds)
             if i == 1
                 #undo environment energy subtract in hamiltonian
                 energyMPOSubtraction!(mpo, -eng_c / Nt)
@@ -117,6 +118,10 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
                 swap_poi = Nt - swap_poi
                 # overlap = lambdamodule(S0, S)
                 S0 = S
+                #for the case of product state, after swap, we apply one step of random gate to connect to sites
+                if s==1 && i==1
+                    psi = random_gate!(psi)
+                end
             end
         end
         isdone && break
