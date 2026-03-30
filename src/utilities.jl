@@ -44,7 +44,7 @@ function new_ind(id)
     end
     return id_new
 end
-function new_site_inds(sites_odd)
+function new_site_inds(swap_poi::Int,sites_odd)
     # phy = string(collect(tags(sites_odd[1]))[1])
     N = length(sites_odd)
     # withqn = hasqns(sites_odd[1]) ? true : false
@@ -55,12 +55,13 @@ function new_site_inds(sites_odd)
         id =sites_odd[i] 
         sites_new[i] = settags(new_ind(id), tags(id))
     end
+    circshift!(sites_new, -swap_poi)
     return sites_new
 end
 function isiteinds(psi)
     #for open boundary psi
     #using a different method of siteinds
-    idx = []
+    idx = Index[]
     N = length(psi)
     for i in 1:N
         ids = inds(psi[i])
@@ -93,4 +94,8 @@ function lambdamodule(l1, l2)
     #     ove += largel1[i] * largel2[i]
     # end
     # return ove
+end
+function filter_kwargs(kws, allowed)
+    # clean_kwargs = Dict(k => v for (k, v) in kws if k in allowed)
+    return (; (k => kws[k] for k in keys(kws) if k in allowed)...)
 end

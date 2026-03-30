@@ -17,6 +17,7 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
         err = abs(en - en_prev) / abs(en)
         if err < tol
             println("Anderson converged at step $j, Energy: $en, err:$err")
+            flush(stdout)
             return L_next, en
         end
         en_prev = en
@@ -162,7 +163,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     #perform few power iteration to improve initial guess
 
     L = mpo.L0
-    for i in 1:4
+    for i in 1:2
         L, en0 = lproduct(L)
     end
     L, _ = anderson_accelerate(L, lproduct, tol=tol)
@@ -191,7 +192,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     end
 
     L = mpo.R0
-    for i in 1:4
+    for i in 1:2
         L, en0 = rproduct(L)
     end
     L, _ = anderson_accelerate(L, rproduct, tol=tol)

@@ -38,7 +38,7 @@ function dmrg3SRSVD(
     # rsvd
     rsvd_qn_min_dim=2,
     rsvd_power_iteration=0,
-    # expansion
+    expansion=true,
     alpha=2e-2,
     alpha_min=1e-8,
     adjust_alpha=true,
@@ -107,6 +107,9 @@ function dmrg3SRSVD(
                 end
                 A = phi
                 B = psi[poi]
+                if !expansion
+                    @goto QR_Norm
+                end
                 # @timeit timer "dmrg: 1-site-SVD" begin
                 rinds = uniqueinds(A, B)
                 ltags = tags(commonind(A, B))
@@ -158,8 +161,8 @@ function dmrg3SRSVD(
                 P = M * rand_ten
                 if b == 1 || b == N
                     cR = commonind(P, W)
-                    clk = commonind(P,LR)
-                    cR = !isnothing(clk) ? [cR,clk] : cR
+                    clk = commonind(P, LR)
+                    cR = !isnothing(clk) ? [cR, clk] : cR
                 else
                     cR = [commonind(P, LR), commonind(P, W)]
                 end
@@ -191,6 +194,8 @@ function dmrg3SRSVD(
                 B, sB = directsum(zero_ten => dag(exp_indx), psi[poi] => com_idx; tags=tags(com_ind))
                 replaceind!(B, sB, sA)
                 # end
+
+                @label QR_Norm
                 rinds = uniqueinds(A, B)
                 ltags = tags(commonind(A, B))
                 U, V = factorize(A, rinds; tags=ltags, ortho="left", which_decomp="qr")
