@@ -123,3 +123,39 @@ function random_gate!(psi0::MPS)
     end
     return psi0
 end
+function random_ini!(psi0::MPS)
+    #apply a random gate to the position where psi0 is disconnected
+    sites = isiteinds(psi0)
+    N = length(psi0)
+    for l in 1:5
+        orthogonalize!(psi0, 1)
+        normalize!(psi0)
+        for i in 1:2:N-1
+            lind = commonind(psi0[i], psi0[i+1])
+            s1 = sites[i]
+            s2 = sites[i+1]
+            g = random_itensor(prime(s1),prime(s2),dag(s1),dag(s2))
+            AB = noprime(g*psi0[i]*psi0[i+1])
+            #not perform qr to decouple AB
+            linds = uniqueinds(psi0[i],psi0[i+1])
+            ltags = "link,n=$i"
+            Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
+            psi0[i] = Q
+            psi0[i+1] = R
+        end
+        for i in 2:2:N-1
+            lind = commonind(psi0[i], psi0[i+1])
+            s1 = sites[i]
+            s2 = sites[i+1]
+            g = random_itensor(prime(s1),prime(s2),dag(s1),dag(s2))
+            AB = noprime(g*psi0[i]*psi0[i+1])
+            #not perform qr to decouple AB
+            linds = uniqueinds(psi0[i],psi0[i+1])
+            ltags = "link,n=$i"
+            Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
+            psi0[i] = Q
+            psi0[i+1] = R
+        end
+    end
+    return psi0
+end

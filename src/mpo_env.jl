@@ -83,6 +83,7 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
     #free the mem
     Ls = nothing
     Rs = nothing
+    GC.gc(true)
     return L, en_prev
 end
 #the local energy terms in enviroment MPO

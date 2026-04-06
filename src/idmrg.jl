@@ -57,7 +57,7 @@ function ITensorMPS.checkdone!(o::local_step_checkdone; kwargs...)
     return false
 end
 function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff, observer=NoObserver(),
-    eigsolve_krylovdim=5, tol=1e-12, eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds=nothing, kwargs...)
+    eigsolve_krylovdim=3, tol=1e-12, eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds=nothing, kwargs...)
     Nt = length(mpo)
     swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
     sites = isiteinds(mpo.H)
@@ -82,6 +82,10 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     for s in 1:nstep_max
         #nsteps = global step
         nstep = nsteps[min(s, length(nsteps))]
+        if iseven(nstep)
+            @printf "Should perform odd number of swaps\n"
+            nstep += 1
+        end
         #nstep: number of local steps
         maxdim = maxdims[min(s, length(maxdims))]
 
@@ -103,6 +107,11 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
             eng_c = 0
             @printf "Energy density at step (%i,%i): %s\n" s i eng / Nt
             flush(stdout)
+            if isodd(i)
+                isdone = checkdone!(observer; eng_density, step=(s, i), psi, S0)
+                isdone && break
+            end
+            i==nstep && break #without swap operation for the last step
             begin
                 S = update_psi!(swap_poi, psi)
                 energyMPOSubtraction!(mpo, eng_density)
@@ -121,9 +130,6 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
                     psi = random_gate!(psi)
                 end
             end
-            isdone = checkdone!(observer; eng_density, step=(s, i), psi, S0)
-            #perform even times swap to makesure it swap back to original configuration
-            isdone && iseven(i) && break
         end
         isdone && break
         #reinitialize environment
