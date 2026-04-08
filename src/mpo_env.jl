@@ -1,7 +1,7 @@
 #using power iteration method to calculate the mpo left/right fixed point
 #to accelerate power iteration
 #using the anderson method
-function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000)
+function anderson_accelerate(L_init, product_func; m=8, tol=1e-12, max_iter=1000)
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
@@ -14,11 +14,15 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
         L_next, en = product_func(L)
         R = L_next - L  # residue
 
-        err = abs(en - en_prev) / abs(en)
+        err = abs(en - en_prev) / max(abs(en),tol)
         if err < tol
             println("Anderson converged at step $j, Energy: $en, err:$err")
             flush(stdout)
             return L_next, en
+        end
+        if mod(j,30)==0
+            println("Anderson step $j, Energy: $en, err:$err")
+            flush(stdout)
         end
         en_prev = en
 
