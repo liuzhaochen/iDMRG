@@ -1,36 +1,48 @@
 #calculate left and right canonical form
+function mpo_env_linkinds(psi::MPS, P::myMPO)
+    N = P.nunitcell
+    lind = commonind(P.L0, P.H[1])
+    rind = commonind(P.R0, P.H[N])
+    return lind, rind
+end
+function central_product(v, P::myMPO)
+    Pv = P.L0 * v * P.R0
+    return noprime(Pv)
+end
 function central_site_problem(psi::MPS, P::myMPO; lambda=nothing)
     #calculate the Lambda
     #first, construct the effective H
     #psi is used to find the correct indices
     N = P.nunitcell
-    Nf = Int(N / 2)
     # PH = P.L0 * P.R0
     lind = commonind(psi[1], P.L0)
     rind = commonind(psi[N], P.R0)
     if isnothing(lind)
         return 1, ITensor(1.0)
     end
+    lambda0 = ITensor(lind, rind)
     if isnothing(lambda)
         lambda = random_itensor(lind, rind)
     end
     # @show lind,rind
 
     lind, rind = mpo_env_linkinds(psi, P)
-    delta_ten = delta(dag(lind), dag(rind))
-
+    replaceind!(P.R0, rind, dag(lind))
+    # delta_ten = delta(dag(lind), dag(rind))
     # central_product(lambda, delta_ten, P)
-    vals, vecs = eigsolve(
-        x -> central_product(x, delta_ten, P),
+    vals, vecs,info = eigsolve(
+        x -> central_product(x, P),
         lambda,
         1,
         :SR;
         ishermitian=true,
         tol=1e-14,
         krylovdim=20,
-        maxiter=1,
+        maxiter=5,
         verbosity=0
     )
+    @show info
+    replaceind!(P.R0, dag(lind), rind)
 
     return vals[1], vecs[1]
 end

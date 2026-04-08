@@ -1,7 +1,7 @@
 #using power iteration method to calculate the mpo left/right fixed point
 #to accelerate power iteration
 #using the anderson method
-function anderson_accelerate(L_init, product_func; m=8, tol=1e-12, max_iter=1000)
+function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000)
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
@@ -14,7 +14,7 @@ function anderson_accelerate(L_init, product_func; m=8, tol=1e-12, max_iter=1000
         L_next, en = product_func(L)
         R = L_next - L  # residue
 
-        err = abs(en - en_prev) / max(abs(en),tol)
+        err = abs(en - en_prev) / max(abs(en), 1.0)
         if err < tol
             println("Anderson converged at step $j, Energy: $en, err:$err")
             flush(stdout)
@@ -60,16 +60,19 @@ function anderson_accelerate(L_init, product_func; m=8, tol=1e-12, max_iter=1000
             G_ext[1:k_active, k_active+1] .= -1.0
             G_ext[k_active+1, 1:k_active] .= -1.0
             #preventing singular matrix
-            for i in 1:k_active
-                G_ext[i, i] += 1e-14 * sub_G[i, i]
-            end
+            # for i in 1:k_active
+            #     G_ext[i, i] += 1e-12
+            # end
 
             rhs = zeros(k_active + 1)
             rhs[k_active+1] = -1.0
 
             try
-                sol = G_ext \ rhs
+                # sol = G_ext \ rhs
+                invG = pinv(G_ext)
+                sol = invG*rhs
                 alpha = sol[1:k_active]
+                alpha = alpha / sum(alpha)
 
                 # new tensor：L_new = ∑ α_i * (L_i + R_i)
                 L_new = alpha[1] * (Ls[1] + Rs[1])
