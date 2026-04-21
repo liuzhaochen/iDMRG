@@ -16,3 +16,7 @@ include("canoncial_form.jl")
 include("observer.jl")
 include("dmrg3SRSVD.jl")
 include("idmrg.jl")
+include("transfer_matrix.jl")
+
+include("vumps/vumps_exp.jl")
+include("vumps/vumps.jl")

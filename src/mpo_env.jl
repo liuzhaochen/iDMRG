@@ -1,7 +1,7 @@
 #using power iteration method to calculate the mpo left/right fixed point
 #to accelerate power iteration
 #using the anderson method
-function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000)
+function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000, outputlevel=1)
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
@@ -16,13 +16,18 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
 
         err = abs(en - en_prev) / max(abs(en), 1.0)
         if err < tol
-            println("Anderson converged at step $j, Energy: $en, err:$err")
-            flush(stdout)
+            if outputlevel >= 1
+                println("Anderson converged at step $j, Energy: $en, err:$err")
+                flush(stdout)
+            end
             return L_next, en
         end
-        if mod(j,30)==0
+        if mod(j, 50) == 0
             println("Anderson step $j, Energy: $en, err:$err")
             flush(stdout)
+        end
+        if mod(j, m) == 0
+            GC.gc(true)
         end
         en_prev = en
 
@@ -70,7 +75,7 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
             try
                 # sol = G_ext \ rhs
                 invG = pinv(G_ext)
-                sol = invG*rhs
+                sol = invG * rhs
                 alpha = sol[1:k_active]
                 alpha = alpha / sum(alpha)
 
@@ -133,12 +138,16 @@ function right_TMv(L, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_le
     replaceind!(L, mpo_lind, dag(mpo_rind))
     return L
 end
-function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12)
+function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12, ini_l=true,
+    ini_r=true, outputlevel = 1)
     Nuc = length(mpo)
     #initialize the left and right MPO env
-    initializeMPOLeft!(psi_left, H_ini, mpo)
-    initializeMPORight!(psi_right, H_ini, mpo)
-
+    if ini_l
+        initializeMPOLeft!(psi_left, H_ini, mpo)
+    end
+    if ini_r
+        initializeMPORight!(psi_right, H_ini, mpo)
+    end
     #bulk MPO for the far left and right link indices
     site_mpo = isiteinds(mpo.H)
     pmpo_sind = prime.(site_mpo)
@@ -171,10 +180,10 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     #perform few power iteration to improve initial guess
 
     L = mpo.L0
-    for i in 1:2
+    for i in 1:1
         L, en0 = lproduct(L)
     end
-    L, _ = anderson_accelerate(L, lproduct, tol=tol)
+    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel)
     mpo.L0 = lproduct(L, rep=false)[1]
     #################################################
     #
@@ -203,7 +212,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:2
         L, en0 = rproduct(L)
     end
-    L, _ = anderson_accelerate(L, rproduct, tol=tol)
+    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel)
     mpo.R0 = rproduct(L, rep=false)[1]
     return nothing
 end

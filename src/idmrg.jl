@@ -9,14 +9,14 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
     if isproduct(psi)
         initializeMPOLeftProduct!(psi, H_ini, mpo; nsweeps)
         initializeMPORightProduct!(psi, H_ini, mpo; nsweeps)
-        return psi
+        return psi, 0
     else
         psi_left, err_l = left_canonical_svd(psi, S0)
         psi_right, err_r = right_canonical_svd(psi, S0)
         err = max(err_l, err_r)
         @printf "Canoncial Error :%s\n" err
         flush(stdout)
-        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs...)
+        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol = max(1e-12, 1e-3*err))
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -31,8 +31,8 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         psi_left = nothing
         psi_right = nothing
         mpo.LR = Vector{ITensor}(undef, length(mpo))
+        return psi, err
     end
-    return psi
 end
 mutable struct local_step_checkdone <: ITensorMPS.AbstractObserver
     #check if the local step converged
@@ -68,7 +68,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     H_ini = mpo.H0
 
     S0 = ipsi.S0
-    psi = initializeIMPO!(psi, H_ini, mpo, S0=S0)
+    psi,_ = initializeIMPO!(psi, H_ini, mpo, S0=S0)
     S = S0
     eng_density = 0
     if isnothing(obs)
@@ -77,7 +77,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     #using sweeps system for global steps
     isdone = false
     solver = mpo.nsite == 1 ? dmrg3SRSVD : dmrg
-    allowed_keys = mpo.nsite == 1 ? (:expansion,) : ()
+    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter) : (:eigsolve_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     for s in 1:nstep_max
         #nsteps = global step
@@ -108,10 +108,10 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
             @printf "Energy density at step (%i,%i): %s\n" s i eng / Nt
             flush(stdout)
             if isodd(i)
-                isdone = checkdone!(observer; eng_density, step=(s, i), psi, S0)
+                isdone = checkdone!(observer; eng_density=eng / Nt, step=(s, i), psi, S0)
                 isdone && break
             end
-            i==nstep && break #without swap operation for the last step
+            i == nstep && break #without swap operation for the last step
             begin
                 S = update_psi!(swap_poi, psi)
                 energyMPOSubtraction!(mpo, eng_density)
@@ -134,7 +134,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         isdone && break
         #reinitialize environment
         if s != nstep_max
-            psi = initializeIMPO!(psi, H_ini, mpo; S0, tol)
+            psi,_ = initializeIMPO!(psi, H_ini, mpo; S0, tol)
         end
         GC.gc(true)
     end

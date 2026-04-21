@@ -37,8 +37,8 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
         :SR;
         ishermitian=true,
         tol=1e-14,
-        krylovdim=5,
-        maxiter=8,
+        krylovdim=20,
+        maxiter=100,
         verbosity=0
     )
     #undo

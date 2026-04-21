@@ -10,12 +10,15 @@ function dmrg3SRSVD(
 )
     # H = permute(H, (linkind, siteinds, linkind))
     # PH = ProjMPO(0, length(H) + 1, 1, H, Vector{ITensor}(undef, length(H)))
+    exp = get(kwargs, :expansion, true)
+    if exp
+        nsweeps*=2
+    end
     sweeps = Sweeps(nsweeps)
     setmaxdim!(sweeps, maxdim...)
     setmindim!(sweeps, mindim...)
     setcutoff!(sweeps, cutoff...)
     setnoise!(sweeps, noise...)
-
     return dmrg3SRSVD(H, psi0, sweeps; kwargs...)
 end
 function dmrg3SRSVD(
@@ -29,7 +32,7 @@ function dmrg3SRSVD(
     write_when_maxdim_exceeds=nothing,
     write_path=tempdir(),
     # eigsolve kwargs
-    eigsolve_tol=1.0e-14,
+    eigsolve_tol=1.0e-10,
     eigsolve_krylovdim=3,
     eigsolve_maxiter=1,
     eigsolve_verbosity=0,
@@ -77,6 +80,9 @@ function dmrg3SRSVD(
             end
             #from left to right
             left_to_right = true
+            if sw>nsweep(sweeps)/2 && expansion
+                expansion = false
+            end
             for (b, ha) in sweepnext(N, ncenter=1) #single site 
                 PH = position!(PH, psi, b)
                 phi = psi[b]
