@@ -127,6 +127,7 @@ function vumps_dmrg3S(
     PH,
     psi0::MPS,
     sweeps::Sweeps;
+    step = 1,
     left_to_right=true,
     which_decomp=nothing,
     svd_alg=nothing,
@@ -254,8 +255,9 @@ function vumps_dmrg3S(
     end
     if outputlevel >= 1
         @printf(
-            "Energy=%s  maxlinkdim=%d maxerr=%.2E mixer=%.2E residual=%.2E time=%.3f\n",
-            energy,
+            "Sweep: %i Energy=%s  maxlinkdim=%d maxerr=%.2E mixer=%.2E residual=%.2E time=%.3f\n",
+            step,
+            energy/length(psi),
             maxlinkdim(psi),
             maxtruncerr,
             alpha,

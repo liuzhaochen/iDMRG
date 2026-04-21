@@ -12,7 +12,7 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, left_to_right; S
     psi_left, err_l = left_canonical_svd(psi, S0)
     psi_right, err_r = right_canonical_svd(psi, S0)
     err = max(err_l, err_r)
-    @printf "Canoncial Error :%s\n" err
+    @printf "Canoncial Error :%.2E\n" err
     flush(stdout)
     #using previous L0, R0 as initial
     ini_l = false
@@ -68,16 +68,15 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
     for j in 1:nstep_max
         #nsteps = global step
         #nstep: number of local steps
-        maxdim = maxdims[min(s, length(maxdims))]
+        maxdim = maxdims[min(j, length(maxdims))]
         #solve the central site problem
         eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
         #substract environment energy
         energyMPOSubtraction!(mpo, eng_c / Nt)
         left_to_right = isodd(j)
         #return psi_c as part of the canonical form
-        eng, psi_c, C = solver(mpo, psi; left_to_right, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
+        eng, psi_c, C = solver(mpo, psi; step=j, left_to_right, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
             kwargs...)
-        @printf "Energy density at step %i: %s\n" j eng / Nt
 
         #undo environment energy subtract in hamiltonian
         energyMPOSubtraction!(mpo, -eng_c / Nt)
@@ -85,7 +84,7 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
         S0 = dag(C) * S0
         psi, err = vumps_initializeIMPO!(psi_c, H_ini, mpo, left_to_right; S0)
         eng_tol = err / 100
-        isdone = checkdone!(observer; energy_density=eng / Nt, step=(s, j), psi, S0)
+        isdone = checkdone!(observer; energy_density=eng / Nt, step=(0, j), psi, S0)
         isdone && break
         GC.gc(true)
     end
