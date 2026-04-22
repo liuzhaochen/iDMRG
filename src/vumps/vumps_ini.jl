@@ -9,7 +9,7 @@ mutable struct vumps_canonical
         return new(MPS(N), MPS(N), ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, N + 1))
     end
 end
-function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical)
+function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi=1)
     N = length(psi)
     site_inds = isiteinds(psi)
     #indices of S0
@@ -88,11 +88,41 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical)
 
     #get new mixed canonical tensor
     psi = copy(vumps.psi_r)
-    psi[1] = psi[1] * R_ten_r[1]
+    for i in 1:poi-1
+        psi[i] = vumps.psi_l[i]
+    end
+    psi[poi] = psi[poi] * vumps.C[poi]
 
     R_ten_l = nothing
     R_ten_r = nothing
     return psi, max(abs(error_l), abs(error_r))
+end
+function vumps_gauge_matrix_left!(vumps::vumps_canonical, S0::ITensor)
+    #we might want to get a new rotation matrix U_L and U_R based on
+    #current S0
+    uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
+    rind = dag(uniqueind(S0, vumps.C[end]))
+    A = vumps.C[end] * dag(S0)
+    U, S, V = svd(A, rind)
+    S = pseudo_id(S)
+    UV = U * S * V
+    replaceind!(UV, rind, uv_r)
+    # @show inds(UV)
+    vumps.U_L = UV
+    return nothing
+end
+function vumps_gauge_matrix_right!(vumps::vumps_canonical, S0::ITensor)
+    #we might want to get a new rotation matrix U_L and U_R based on
+    #current S0
+    uv_l = uniqueind(vumps.U_R, vumps.psi_r[1])
+    lind = dag(uniqueind(S0, vumps.C[1]))
+    A = vumps.C[1] * dag(S0)
+    U, S, V = svd(A, lind)
+    S = pseudo_id(S)
+    UV = U * S * V
+    replaceind!(UV, lind, uv_l)
+    vumps.U_R = UV
+    return nothing
 end
 function vumps_canonical_form(vumps::vumps_canonical)
     psi_left = copy(vumps.psi_l)

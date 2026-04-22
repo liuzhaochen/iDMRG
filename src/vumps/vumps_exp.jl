@@ -153,7 +153,7 @@ function vumps_bond_left_solve(i::Int, PH, psi_l::MPS, C
         verbosity=eigsolve_verbosity,
         eager=true,
     )
-    return vecs[1]
+    return vals[1], vecs[1]
 end
 function vumps_bond_right_solve(i::Int, PH, psi_r::MPS, C;
     eigsolve_tol=1.0e-10,
@@ -180,7 +180,7 @@ function vumps_bond_right_solve(i::Int, PH, psi_r::MPS, C;
         verbosity=eigsolve_verbosity,
         eager=true,
     )
-    return vecs[1]
+    return vals[1], vecs[1]
 end
 function vumps_site_solve(PH, phi;
     residual,
@@ -262,12 +262,6 @@ function vumps_dmrg3S(
         # for b in order
         b = poi
         PH = position!(PH, psi, b)
-        #first the central site problem
-        #solve the bond problem
-        C_1 = vumps_bond_right_solve(b, PH, vumps.psi_r, vumps.C[b]; eigsolve_tol)
-        vumps.C[b] = C_1
-        C_2 = vumps_bond_left_solve(b, PH, vumps.psi_l, vumps.C[b+1]; eigsolve_tol)
-        vumps.C[b+1] = C_2
         energy, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
         poi_l = b + dx
 
@@ -281,29 +275,37 @@ function vumps_dmrg3S(
         #now, update the canoncial vectors with 
         #A*inv(C_2) = L
         #inv(C_2)*A = R
-        A = phi * dag(C_2)
-        linds = uniqueinds(phi, dag(C_2))
-        U, S, V = svd(A, linds)
-        S = pseudo_id(S)
-        A = U * S * V
-        #update mixed psi
-        vumps.psi_l[b] = A
+        for i in 1:2
+            #two steps for bond matrix
+            #such that L*C_2 = A = C_1 * R
+            eng_1, C_1 = vumps_bond_right_solve(b, PH, vumps.psi_r, vumps.C[b]; eigsolve_tol)
+            vumps.C[b] = C_1
+            eng_2, C_2 = vumps_bond_left_solve(b, PH, vumps.psi_l, vumps.C[b+1]; eigsolve_tol)
+            vumps.C[b+1] = C_2
+
+            A = phi * dag(C_2)
+            linds = uniqueinds(phi, dag(C_2))
+            U, S, V = svd(A, linds)
+            S = pseudo_id(S)
+            A = U * S * V
+            vumps.psi_l[b] = A
+
+            A = phi * dag(C_1)
+            linds = uniqueinds(phi, dag(C_1))
+            U, S, V = svd(A, linds)
+            S = pseudo_id(S)
+            A = U * S * V
+            vumps.psi_r[b] = A
+        end
         if left_to_right && b != N
-            psi[b] = copy(A)
-            psi[poi_l] = C_2 * psi[poi_l]
+            psi[b] = copy(vumps.psi_l[b])
+            psi[poi_l] = vumps.C[b+1] * psi[poi_l]
         elseif !left_to_right && b != 1
-            psi[poi_l] = C_1 * psi[poi_l]
+            psi[poi_l] = vumps.C[b] * psi[poi_l]
         else
             psi[b] = phi
+            # psi[b] = vumps.psi_l[b]*C_2
         end
-
-        A = phi * dag(C_1)
-        linds = uniqueinds(phi, dag(C_1))
-        U, S, V = svd(A, linds)
-        S = pseudo_id(S)
-        A = U * S * V
-        vumps.psi_r[b] = A
-
         #update the mixed psi
         # if left_to_right && b == N
         #     psi[b] = A

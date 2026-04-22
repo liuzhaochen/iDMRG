@@ -59,20 +59,14 @@ end
 function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObserver(),
     eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
     tol=(x -> max(1e-14, x / 100)), kwargs...)
-    Nt = length(mpo)
-    swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
-    sites = isiteinds(mpo.H)
-    #solve central site problem to get S0
-    #for product state as initial state
-    #the enviroment does not have links connect to mps
     #note, this method does not work for pure product state
     #using iDMRG to prepare initial state
+    Nt = length(mpo)
     nsweeps = 1
     psi = ipsi.psi
     H_ini = mpo.H0
 
     S0 = ipsi.S0
-    C = nothing
     # psi, err = initializeIMPO!(psi, H_ini, mpo, S0=S0)
     vumps = vumps_canonical(Nt)
     psi, err = vumps_canonical_form(psi, S0, vumps)
@@ -80,10 +74,9 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
         ini_r=true, ini_l=true, expansion=false, err)
 
 
-    eng_tol = err / 100
     eng_density = 0
     if isnothing(obs)
-        obs = local_step_checkdone(; eng_tol)
+        obs = local_step_checkdone(; eng_tol=1e-12)
     end
     #using sweeps system for global steps
     isdone = false
@@ -91,36 +84,56 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
     allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter) : (:eigsolve_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     eng = 0
+    eng_c = 0
     step = 0
     for j in 1:nstep_max
         #nsteps = global step
         #nstep: number of local steps
+        @printf "Canoncial Error :%.2E\n" err
         maxdim = maxdims[min(j, length(maxdims))]
 
         order = 1:Nt
+        eng_tol = tol(err)
         for b in order
             step += 1
             #substract environment energy
             eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng_tol = tol(err)
             eng, psi = solver(mpo, psi; step, vumps,
                 poi=b, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
                 kwargs...)
             #undo environment energy subtract in hamiltonian
             energyMPOSubtraction!(mpo, -eng_c / Nt)
-            if b == order[end]
-                break
-            end
             #reinitialize the enviroment with updated psi_left and psi_right
-            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err)
+            if b != Nt
+                # vumps_gauge_matrix_left!(vumps, S0)
+                # vumps_gauge_matrix_right!(vumps, S0)
+                psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err)
+            end
         end
+
+        # for b in order
+        #     step += 1
+        #     #substract environment energy
+        #     eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
+        #     energyMPOSubtraction!(mpo, eng_c / Nt)
+        #     eng, psi = solver(mpo, psi; step, vumps,
+        #         poi=b, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
+        #         kwargs...)
+        #     #undo environment energy subtract in hamiltonian
+        #     #for this update, no need to solve central site problem
+        #     energyMPOSubtraction!(mpo, -eng_c / Nt)
+        #     if b != Nt
+        #         psi, err = vumps_canonical_form(psi, S0, vumps; poi=b + 1)
+        #         @printf "Canoncial Error :%.2E\n" err
+        #         psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err)
+        #     end
+        # end
 
         #update S0 matrix 
         # eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
         #update left/right canonical based on current mixed form
         psi, err = vumps_canonical_form(psi, S0, vumps)
-        @printf "Canoncial Error :%.2E\n" err
         psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, kwargs..., err)
         isdone = checkdone!(observer; eng_density=eng / Nt, step=(0, j), psi, S0)
         isdone && break
