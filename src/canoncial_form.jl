@@ -38,7 +38,7 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
         ishermitian=true,
         tol=1e-14,
         krylovdim=20,
-        maxiter=100,
+        maxiter=200,
         verbosity=0
     )
     #undo
@@ -139,7 +139,7 @@ function right_canonical_svd(psi0::MPS, S0::ITensor)
         end
     end
     error = abs(1 - error[])
-    rnew = settags(new_ind(lind), tags(lind))
-    replaceind!(psi[1], lind, rnew)
+    # rnew = settags(new_ind(lind), tags(lind))
+    # replaceind!(psi[1], lind, rnew)
     return psi, error
 end

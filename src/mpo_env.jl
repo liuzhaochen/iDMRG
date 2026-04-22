@@ -13,17 +13,30 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
         # --- Power Iteration  ---
         L_next, en = product_func(L)
         R = L_next - L  # residue
-
+        err_R = (R*dag(R))[]
         err = abs(en - en_prev) / max(abs(en), 1.0)
         if err < tol
             if outputlevel >= 1
-                println("Anderson converged at step $j, Energy: $en, err:$err")
+                @printf(
+                    "DIIS Env @ %i Energy=%s  err=%.2E residual=%.2E\n",
+                    j,
+                    en,
+                    err,
+                    err_R
+                )
+                # println("Anderson converged at step $j, Energy: $en, err:$err, err_R:$err_R")
                 flush(stdout)
             end
             return L_next, en
         end
         if mod(j, 50) == 0
-            println("Anderson step $j, Energy: $en, err:$err")
+            @printf(
+                "DIIS Env @ %i Energy=%s  err=%.2E residual=%.2E\n",
+                j,
+                en,
+                err,
+                err_R
+            )
             flush(stdout)
         end
         if mod(j, m) == 0
@@ -139,7 +152,7 @@ function right_TMv(L, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_le
     return L
 end
 function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12, ini_l=true,
-    ini_r=true, outputlevel = 1)
+    ini_r=true, outputlevel=1, replace=false)
     Nuc = length(mpo)
     #initialize the left and right MPO env
     if ini_l
@@ -184,7 +197,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
         L, en0 = lproduct(L)
     end
     L, _ = anderson_accelerate(L, lproduct; tol, outputlevel)
-    mpo.L0 = lproduct(L, rep=false)[1]
+    mpo.L0 = lproduct(L, rep=replace)[1]
     #################################################
     #
     #             Right Enviroment
@@ -209,10 +222,10 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     end
 
     L = mpo.R0
-    for i in 1:2
+    for i in 1:1
         L, en0 = rproduct(L)
     end
     L, _ = anderson_accelerate(L, rproduct; tol, outputlevel)
-    mpo.R0 = rproduct(L, rep=false)[1]
+    mpo.R0 = rproduct(L, rep=replace)[1]
     return nothing
 end

@@ -123,11 +123,98 @@ function subspace_exp(A, B, PH, b::Int, poi::Int, N::Int, left_to_right::Bool;
     v_id = delta(com_idx, out_idx)
     return A, B, maxtruncerr, alpha
 end
+function bond_product(L, R, v)
+    Pv = L * v * R
+    return noprime!(Pv)
+end
+function vumps_bond_left_solve(i::Int, PH, psi_l::MPS, C
+    ;
+    eigsolve_tol=1.0e-10,
+    eigsolve_krylovdim=30,
+    eigsolve_maxiter=100,
+    eigsolve_verbosity=0,
+    eigsolve_which_eigenvalue=:SR,
+    ishermitian=true)
+    L = lproj(PH)
+    R = rproj(PH)
+    H = PH.H[i]
+    phi = psi_l[i]
+    #update L 
+    L = L * phi * H * prime(dag(phi))
+    vals, vecs, info = eigsolve(
+        x -> bond_product(L, R, x),
+        C,
+        1,
+        eigsolve_which_eigenvalue;
+        ishermitian,
+        tol=eigsolve_tol,
+        krylovdim=eigsolve_krylovdim,
+        maxiter=eigsolve_maxiter,
+        verbosity=eigsolve_verbosity,
+        eager=true,
+    )
+    return vecs[1]
+end
+function vumps_bond_right_solve(i::Int, PH, psi_r::MPS, C;
+    eigsolve_tol=1.0e-10,
+    eigsolve_krylovdim=30,
+    eigsolve_maxiter=100,
+    eigsolve_verbosity=0,
+    eigsolve_which_eigenvalue=:SR,
+    ishermitian=true)
+    L = lproj(PH)
+    R = rproj(PH)
+    H = PH.H[i]
+    phi = psi_r[i]
+    #update R 
+    R = R * phi * H * prime(dag(phi))
+    vals, vecs, info = eigsolve(
+        x -> bond_product(L, R, x),
+        C,
+        1,
+        eigsolve_which_eigenvalue;
+        ishermitian,
+        tol=eigsolve_tol,
+        krylovdim=eigsolve_krylovdim,
+        maxiter=eigsolve_maxiter,
+        verbosity=eigsolve_verbosity,
+        eager=true,
+    )
+    return vecs[1]
+end
+function vumps_site_solve(PH, phi;
+    residual,
+    eigsolve_tol=1.0e-10,
+    eigsolve_krylovdim=30,
+    eigsolve_maxiter=100,
+    eigsolve_verbosity=0,
+    eigsolve_which_eigenvalue=:SR,
+    ishermitian=true)
+    vals, vecs, info = eigsolve(
+        PH,
+        phi,
+        1,
+        eigsolve_which_eigenvalue;
+        ishermitian,
+        tol=eigsolve_tol,
+        krylovdim=eigsolve_krylovdim,
+        maxiter=eigsolve_maxiter,
+        verbosity=eigsolve_verbosity,
+        eager=true,
+    )
+    residual = max(residual, info.normres[1])
+
+    energy = vals[1]
+    phi = vecs[1]
+    return energy, phi, residual
+end
 function vumps_dmrg3S(
     PH,
     psi0::MPS,
     sweeps::Sweeps;
-    step = 1,
+    step=1,
+    poi=1,
+    vumps=nothing,
     left_to_right=true,
     which_decomp=nothing,
     svd_alg=nothing,
@@ -152,153 +239,158 @@ function vumps_dmrg3S(
 )
     psi = copy(psi0)
     N = length(psi)
-    if left_to_right
-        psi = orthogonalize!(PH, psi, 1)
-    else
-        psi = orthogonalize!(PH, psi, N)
-    end
+
     # @assert isortho(psi) && orthocenter(psi) == 1
 
-    if !isnothing(write_when_maxdim_exceeds)
-        if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
-           (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
-            PH = disk(PH; path=write_path)
-        end
-    end
-    PH = position!(PH, psi, 1)
     energy = 0.0
     residual = 0.0
     spec = nothing
-    Nexp = 0
-    alg = "global_krylov"
     sw = 1
-    order = left_to_right ? (1:N) : (N:-1:1)
-    central_bond_tensor = nothing
+    # central_bond_tensor = nothing
     ha = left_to_right ? 1 : 2
+    dx = left_to_right ? 1 : -1
+    order = left_to_right ? (1:N) : (N:-1:1)
+    # sites = isiteinds(psi)
+    maxtruncerr = 0.0
     sw_time = @elapsed begin
-        maxtruncerr = 0.0
-        if !isnothing(write_when_maxdim_exceeds) &&
-           maxdim(sweeps, sw) > write_when_maxdim_exceeds
-            if outputlevel >= 2
-                println(
-                    "\nWriting environment tensors do disk (write_when_maxdim_exceeds = $write_when_maxdim_exceeds and maxdim(sweeps, sw) = $(maxdim(sweeps, sw))).\nFiles located at path=$write_path\n",
-                )
+        if !isnothing(write_when_maxdim_exceeds)
+            if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
+               (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
+                PH = disk(PH; path=write_path)
             end
-            PH = disk(PH; path=write_path)
         end
-        for b in order
-            PH = position!(PH, psi, b)
-            phi = psi[b]
-            vals, vecs, info = eigsolve(
-                PH,
-                phi,
-                1,
-                eigsolve_which_eigenvalue;
-                ishermitian,
-                tol=eigsolve_tol,
-                krylovdim=eigsolve_krylovdim,
-                maxiter=eigsolve_maxiter,
-                verbosity=eigsolve_verbosity,
-                eager=true,
-            )
-            residual = max(residual, info.normres[1])
+        # for b in order
+        b = poi
+        PH = position!(PH, psi, b)
+        #first the central site problem
+        #solve the bond problem
+        C_1 = vumps_bond_right_solve(b, PH, vumps.psi_r, vumps.C[b]; eigsolve_tol)
+        vumps.C[b] = C_1
+        C_2 = vumps_bond_left_solve(b, PH, vumps.psi_l, vumps.C[b+1]; eigsolve_tol)
+        vumps.C[b+1] = C_2
+        energy, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
+        poi_l = b + dx
 
-            energy = vals[1]
-            phi = vecs[1]
-
-            poi = b - 1
-            A = phi
-            if left_to_right
-                poi = b + 1
-            end
-            B = ITensor(1.0)
-            if left_to_right && b == N
-            elseif !left_to_right && b == 1
-            else
-                B = psi[poi]
-            end
-
-            if !expansion
-                @goto QR_Norm
-            end
-            A, V, maxtruncerr, alpha = subspace_exp(A, B, PH, b, poi, N, left_to_right; sweeps, sw, maxtruncerr,
-                adjust_alpha, alpha, alpha_min, rsvd_qn_min_dim)
-            B = V * B
-            @label QR_Norm
-            if left_to_right && b == N
-                psi[b] = A
-                central_bond_tensor = B
-            elseif !left_to_right && b == 1
-                psi[b] = A
-                central_bond_tensor = B
-            else
-                rinds = uniqueinds(A, B)
-                ltags = tags(commonind(A, B))
-                U, V = factorize(A, rinds; tags=ltags, ortho="left", which_decomp="qr")
-                psi[b] = U
-                psi[poi] = V * B
-            end
-            sweep_is_done = (b == 1 && ha == 2)
-            ITensorMPS.measure!(
-                observer;
-                energy,
-                psi,
-                projected_operator=PH,
-                bond=b,
-                sweep=sw,
-                half_sweep=ha,
-                spec,
-                outputlevel,
-                sweep_is_done,
-            )
+        # if !expansion
+        #     @goto QR_Norm
+        # end
+        # A, V, maxtruncerr, alpha = subspace_exp(A, B, PH, b, poi, N, left_to_right; sweeps, sw, maxtruncerr,
+        #     adjust_alpha, alpha, alpha_min, rsvd_qn_min_dim)
+        # B = V * B
+        # @label QR_Norm
+        #now, update the canoncial vectors with 
+        #A*inv(C_2) = L
+        #inv(C_2)*A = R
+        A = phi * dag(C_2)
+        linds = uniqueinds(phi, dag(C_2))
+        U, S, V = svd(A, linds)
+        S = pseudo_id(S)
+        A = U * S * V
+        #update mixed psi
+        vumps.psi_l[b] = A
+        if left_to_right && b != N
+            psi[b] = copy(A)
+            psi[poi_l] = C_2 * psi[poi_l]
+        elseif !left_to_right && b != 1
+            psi[poi_l] = C_1 * psi[poi_l]
+        else
+            psi[b] = phi
         end
+
+        A = phi * dag(C_1)
+        linds = uniqueinds(phi, dag(C_1))
+        U, S, V = svd(A, linds)
+        S = pseudo_id(S)
+        A = U * S * V
+        vumps.psi_r[b] = A
+
+        #update the mixed psi
+        # if left_to_right && b == N
+        #     psi[b] = A
+        #     central_bond_tensor = B
+        # elseif !left_to_right && b == 1
+        #     psi[b] = A
+        #     central_bond_tensor = B
+        # else
+        #     #change psi[b] to canonical form
+        #     rinds = uniqueinds(A, B)
+        #     ltags = tags(commonind(A, B))
+        #     U, V = factorize(A, rinds; tags=ltags, ortho="left", which_decomp="qr")
+        #     psi[b] = U
+        #     # psi_canonical[b] = U
+        #     psi[poi] = V * B
+        # end
+        sweep_is_done = (b == 1 && ha == 2)
+        ITensorMPS.measure!(
+            observer;
+            energy,
+            psi,
+            projected_operator=PH,
+            bond=b,
+            sweep=sw,
+            half_sweep=ha,
+            spec,
+            outputlevel,
+            sweep_is_done,
+        )
     end
     if outputlevel >= 1
+        # @printf(
+        #     "Sweep: %i Energy=%s  maxlinkdim=%d maxerr=%.2E mixer=%.2E residual=%.2E time=%.3f\n",
+        #     step,
+        #     energy / length(psi),
+        #     maxlinkdim(psi),
+        #     maxtruncerr,
+        #     alpha,
+        #     residual,
+        #     sw_time
+        # )
         @printf(
-            "Sweep: %i Energy=%s  maxlinkdim=%d maxerr=%.2E mixer=%.2E residual=%.2E time=%.3f\n",
+            "Sweep: %i Energy=%s  maxlinkdim=%d residual=%.2E time=%.3f\n",
             step,
-            energy/length(psi),
+            energy / length(psi),
             maxlinkdim(psi),
-            maxtruncerr,
-            alpha,
             residual,
             sw_time
         )
         flush(stdout)
     end
     isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)
-    return (energy, psi, central_bond_tensor)
+    return (energy, psi)
 end
-function vumps_central_bond(left_to_right::Bool, psi::MPS, C0::ITensor, PH::iMPO)
+function vumps_central_bonds(left_to_right::Bool, psi::MPS, C::ITensor,
+    PH::iMPO, write_when_maxdim_exceeds=4000)
     #solving the corresponding central site problem
     #construct temperal env
+    psi = copy(psi)
     N = length(psi)
-    b = N
-    if left_to_right
-        L = lproj(PH)
-        R = PH.R0
-    else
-        L = rproj(PH)
-        R = PH.L0
-        b = 1
+    order = left_to_right ? (N:-1:1) : (1:N)
+    dx = left_to_right ? -1 : 1
+    C0 = C
+    central_bonds = Vector{ITensor}(undef, N)
+    for b in order
+        # PH = position!(PH, psi, b)
+        # L = lproj(PH)
+        # R = rproj(PH)
+        #update L
+        # L = L * psi[b] * PH.H[b] * prime(dag(psi[b]))
+        central_bonds[b] = C0
+        A = C0 * psi[b]
+        if left_to_right && b == 1
+            psi[b] = A
+            break
+        end
+        if !left_to_right && b == N
+            psi[b] = A
+            break
+        end
+        #shift bond to next position
+        B = psi[b+dx]
+        rinds = uniqueinds(A, B)
+        ltags = tags(commonind(A, B))
+        U, V = factorize(A, rinds; tags=ltags, ortho="left", which_decomp="qr")
+        psi[b] = U
+        C0 = V
     end
-    #update L
-    L = L * psi[b] * PH.H[b] * prime(dag(psi[b]))
-    #solve the central site 
-    function central_product(v)
-        Pv = (L * v) * R
-        return noprime(Pv)
-    end
-    vals, vecs = eigsolve(
-        x -> central_product(x),
-        C0,
-        1,
-        :SR;
-        ishermitian=true,
-        tol=1e-14,
-        krylovdim=20,
-        maxiter=100,
-        verbosity=0
-    )
-    return vals[1], vecs[1]
+    return psi, central_bonds
 end
