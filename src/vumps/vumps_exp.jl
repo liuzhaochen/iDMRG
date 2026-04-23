@@ -215,6 +215,7 @@ function vumps_dmrg3S(
     step=1,
     poi=1,
     vumps=nothing,
+    bond_maxiter=5,
     left_to_right=true,
     which_decomp=nothing,
     svd_alg=nothing,
@@ -265,20 +266,11 @@ function vumps_dmrg3S(
         energy, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
         poi_l = b + dx
 
-        # if !expansion
-        #     @goto QR_Norm
-        # end
-        # A, V, maxtruncerr, alpha = subspace_exp(A, B, PH, b, poi, N, left_to_right; sweeps, sw, maxtruncerr,
-        #     adjust_alpha, alpha, alpha_min, rsvd_qn_min_dim)
-        # B = V * B
-        # @label QR_Norm
-        #now, update the canoncial vectors with 
-        #A*inv(C_2) = L
-        #inv(C_2)*A = R
-        for i in 1:2
+        energy0 = energy
+        for i in 1:bond_maxiter
             #two steps for bond matrix
             #such that L*C_2 = A = C_1 * R
-            eng_1, C_1 = vumps_bond_right_solve(b, PH, vumps.psi_r, vumps.C[b]; eigsolve_tol)
+            energy, C_1 = vumps_bond_right_solve(b, PH, vumps.psi_r, vumps.C[b]; eigsolve_tol)
             vumps.C[b] = C_1
             eng_2, C_2 = vumps_bond_left_solve(b, PH, vumps.psi_l, vumps.C[b+1]; eigsolve_tol)
             vumps.C[b+1] = C_2
@@ -296,32 +288,26 @@ function vumps_dmrg3S(
             S = pseudo_id(S)
             A = U * S * V
             vumps.psi_r[b] = A
+            err_bond = abs((energy - energy0) / max(0.1, abs(energy0)))
+            energy0 = energy
+            if err_bond < eigsolve_tol || i==bond_maxiter
+                break
+            end
         end
         if left_to_right && b != N
             psi[b] = copy(vumps.psi_l[b])
             psi[poi_l] = vumps.C[b+1] * psi[poi_l]
         elseif !left_to_right && b != 1
+            psi[b] = copy(vumps.psi_r[b])
             psi[poi_l] = vumps.C[b] * psi[poi_l]
         else
-            psi[b] = phi
-            # psi[b] = vumps.psi_l[b]*C_2
+            if left_to_right
+                # psi[b] = phi
+                psi[b] = vumps.psi_l[b] * vumps.C[b+1]
+            else
+                psi[b] = vumps.psi_r[b] * vumps.C[b]
+            end
         end
-        #update the mixed psi
-        # if left_to_right && b == N
-        #     psi[b] = A
-        #     central_bond_tensor = B
-        # elseif !left_to_right && b == 1
-        #     psi[b] = A
-        #     central_bond_tensor = B
-        # else
-        #     #change psi[b] to canonical form
-        #     rinds = uniqueinds(A, B)
-        #     ltags = tags(commonind(A, B))
-        #     U, V = factorize(A, rinds; tags=ltags, ortho="left", which_decomp="qr")
-        #     psi[b] = U
-        #     # psi_canonical[b] = U
-        #     psi[poi] = V * B
-        # end
         sweep_is_done = (b == 1 && ha == 2)
         ITensorMPS.measure!(
             observer;
@@ -358,7 +344,7 @@ function vumps_dmrg3S(
         flush(stdout)
     end
     isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)
-    return (energy, psi)
+    return (energy, psi, isdone)
 end
 function vumps_central_bonds(left_to_right::Bool, psi::MPS, C::ITensor,
     PH::iMPO, write_when_maxdim_exceeds=4000)

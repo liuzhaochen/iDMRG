@@ -92,7 +92,7 @@ function left_canonical_svd(psi0::MPS, S0::ITensor)
         psi[j] = Q
     end
     #match L_ini indices
-    error = abs(1 - error[])
+    error = sqrt(2abs(1 - error[]))
     return psi, error
 end
 function right_canonical_svd(psi0::MPS, S0::ITensor)
@@ -138,7 +138,7 @@ function right_canonical_svd(psi0::MPS, S0::ITensor)
             error = ((error * Q) * dag(psi0[j])) * S
         end
     end
-    error = abs(1 - error[])
+    error = sqrt(2abs(1 - error[]))
     # rnew = settags(new_ind(lind), tags(lind))
     # replaceind!(psi[1], lind, rnew)
     return psi, error

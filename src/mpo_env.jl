@@ -1,7 +1,7 @@
 #using power iteration method to calculate the mpo left/right fixed point
 #to accelerate power iteration
 #using the anderson method
-function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000, outputlevel=1)
+function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=300, outputlevel=1)
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
@@ -29,7 +29,7 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=1000
             end
             return L_next, en
         end
-        if mod(j, 50) == 0
+        if mod(j, 100) == 0
             @printf(
                 "DIIS Env @ %i Energy=%s  err=%.2E residual=%.2E\n",
                 j,
@@ -152,7 +152,7 @@ function right_TMv(L, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_le
     return L
 end
 function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12, ini_l=true,
-    ini_r=true, outputlevel=1, replace=false)
+    ini_r=true, outputlevel=1, replace=false, env_dim = 5)
     Nuc = length(mpo)
     #initialize the left and right MPO env
     if ini_l
@@ -196,7 +196,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:1
         L, en0 = lproduct(L)
     end
-    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel)
+    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel, m = env_dim)
     mpo.L0 = lproduct(L, rep=replace)[1]
     #################################################
     #
@@ -225,7 +225,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:1
         L, en0 = rproduct(L)
     end
-    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel)
+    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel, m = env_dim)
     mpo.R0 = rproduct(L, rep=replace)[1]
     return nothing
 end

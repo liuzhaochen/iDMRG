@@ -1,5 +1,5 @@
 
-function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing,
+function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing, err_0 = nothing, 
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
@@ -16,7 +16,8 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         err = max(err_l, err_r)
         @printf "Canoncial Error :%s\n" err
         flush(stdout)
-        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol = max(1e-12, 1e-3*err))
+        err_0 = isnothing(err_0) ? 1e-4*err : err_0
+        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol = max(1e-12, err_0))
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -68,7 +69,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     H_ini = mpo.H0
 
     S0 = ipsi.S0
-    psi,_ = initializeIMPO!(psi, H_ini, mpo, S0=S0)
+    psi,_ = initializeIMPO!(psi, H_ini, mpo, S0=S0, err_0 = 1e-12)
     S = S0
     eng_density = 0
     if isnothing(obs)
@@ -134,7 +135,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         isdone && break
         #reinitialize environment
         if s != nstep_max
-            psi,_ = initializeIMPO!(psi, H_ini, mpo; S0, tol)
+            psi,_ = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0 = 1e-12)
         end
         GC.gc(true)
     end

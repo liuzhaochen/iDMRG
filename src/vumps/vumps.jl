@@ -37,7 +37,7 @@ function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_ri
     replaceind!(S0, lind, dag(lind_p))
 end
 function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_canonical, left_to_right;
-    S0=nothing, expansion=true, ini_r=false, ini_l=false, err=0,
+    S0=nothing, expansion=true, ini_r=false, ini_l=false, err=0, outputlevel=0,
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
@@ -48,15 +48,15 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
     mpo.rpos = length(mpo) + 1
     psi_left, psi_right = vumps_canonical_form(vumps)
     flush(stdout)
-    mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., ini_l, ini_r, outputlevel=0,
-        tol=max(1e-12, 1e-2 * err))
+    mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., ini_l, ini_r, outputlevel,
+        tol=max(1e-12,err))
     mpo.LR = Vector{ITensor}(undef, length(mpo))
     vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
     psi_left = nothing
     psi_right = nothing
     return psi
 end
-function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObserver(),
+function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObserver(), env_dim=5,
     eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
     tol=(x -> max(1e-14, x / 100)), kwargs...)
     #note, this method does not work for pure product state
@@ -71,17 +71,15 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
     vumps = vumps_canonical(Nt)
     psi, err = vumps_canonical_form(psi, S0, vumps)
     psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0,
-        ini_r=true, ini_l=true, expansion=false, err)
-
+        ini_r=true, ini_l=true, err = 1e-12, env_dim)
 
     eng_density = 0
     if isnothing(obs)
         obs = local_step_checkdone(; eng_tol=1e-12)
     end
-    #using sweeps system for global steps
     isdone = false
     solver = mpo.nsite == 1 ? vumps_dmrg3S : error("only support singe site version")
-    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter) : (:eigsolve_maxiter,)
+    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter, :bond_maxiter) : (:eigsolve_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     eng = 0
     eng_c = 0
@@ -89,55 +87,34 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
     for j in 1:nstep_max
         #nsteps = global step
         #nstep: number of local steps
-        @printf "Canoncial Error :%.2E\n" err
         maxdim = maxdims[min(j, length(maxdims))]
-
-        order = 1:Nt
+        left_to_right = isodd(j)
+        order = left_to_right ? (1:Nt) : (Nt:-1:1)
         eng_tol = tol(err)
+        @printf "Canoncial Error at step %i :%.2E\n" step err
         for b in order
             step += 1
             #substract environment energy
             eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng, psi = solver(mpo, psi; step, vumps,
+            eng, psi, _ = solver(mpo, psi; step, vumps, left_to_right,
                 poi=b, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
                 kwargs...)
             #undo environment energy subtract in hamiltonian
             energyMPOSubtraction!(mpo, -eng_c / Nt)
+            isdone = checkdone!(observer; eng_density=eng / Nt, step=(0, step), psi, S0)
+            isdone && break
             #reinitialize the enviroment with updated psi_left and psi_right
-            if b != Nt
-                # vumps_gauge_matrix_left!(vumps, S0)
-                # vumps_gauge_matrix_right!(vumps, S0)
-                psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err)
+            if b == Nt && left_to_right
+                err = vumps_gauge_matrix_left!(psi, vumps, S0)
             end
+            if b == 1 && !left_to_right
+                err = vumps_gauge_matrix_right!(psi, vumps, S0)
+            end
+            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err = tol(err/100))
         end
-
-        # for b in order
-        #     step += 1
-        #     #substract environment energy
-        #     eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
-        #     energyMPOSubtraction!(mpo, eng_c / Nt)
-        #     eng, psi = solver(mpo, psi; step, vumps,
-        #         poi=b, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
-        #         kwargs...)
-        #     #undo environment energy subtract in hamiltonian
-        #     #for this update, no need to solve central site problem
-        #     energyMPOSubtraction!(mpo, -eng_c / Nt)
-        #     if b != Nt
-        #         psi, err = vumps_canonical_form(psi, S0, vumps; poi=b + 1)
-        #         @printf "Canoncial Error :%.2E\n" err
-        #         psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err)
-        #     end
-        # end
-
-        #update S0 matrix 
-        # eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
-        #update left/right canonical based on current mixed form
-        psi, err = vumps_canonical_form(psi, S0, vumps)
-        psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, kwargs..., err)
-        isdone = checkdone!(observer; eng_density=eng / Nt, step=(0, j), psi, S0)
-        isdone && break
         GC.gc(true)
+        isdone && break
     end
     ipsi.psi = psi
     ipsi.S0 = S0

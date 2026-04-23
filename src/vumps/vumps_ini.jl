@@ -95,13 +95,20 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
 
     R_ten_l = nothing
     R_ten_r = nothing
-    return psi, max(abs(error_l), abs(error_r))
+    return psi, sqrt(2 * max(abs(error_l), abs(error_r)))
 end
-function vumps_gauge_matrix_left!(vumps::vumps_canonical, S0::ITensor)
-    #we might want to get a new rotation matrix U_L and U_R based on
-    #current S0
+function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor)
+    #using psi to update boundary bond tensor
     uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
     rind = dag(uniqueind(S0, vumps.C[end]))
+    # N = length(psi)
+    # lind = (commonind(psi[end], psi[end-1]), isiteinds(psi)[N])
+    # Q, R = factorize(psi[end], lind; tags="cLink,$N", which_decomp="qr")
+
+    # vumps.psi_l[N] = Q
+    # vumps.C[N+1] = R
+    #we might want to get a new rotation matrix U_L and U_R based on
+    #current S0
     A = vumps.C[end] * dag(S0)
     U, S, V = svd(A, rind)
     S = pseudo_id(S)
@@ -109,20 +116,31 @@ function vumps_gauge_matrix_left!(vumps::vumps_canonical, S0::ITensor)
     replaceind!(UV, rind, uv_r)
     # @show inds(UV)
     vumps.U_L = UV
-    return nothing
+    #calculate canonical error here
+    err_r = dag(vumps.C[end]) * UV * delta(dag(uv_r), rind) * S0
+    err_r = sqrt(2 * abs(1 - err_r[]))
+    return err_r
 end
-function vumps_gauge_matrix_right!(vumps::vumps_canonical, S0::ITensor)
+function vumps_gauge_matrix_right!(psi::MPS, vumps::vumps_canonical, S0::ITensor)
     #we might want to get a new rotation matrix U_L and U_R based on
     #current S0
     uv_l = uniqueind(vumps.U_R, vumps.psi_r[1])
     lind = dag(uniqueind(S0, vumps.C[1]))
-    A = vumps.C[1] * dag(S0)
+
+    # rind = (commonind(psi[1], psi[2]), isiteinds(psi)[1])
+    # Q, R = factorize(psi[1], rind; tags="cLink,1", which_decomp="qr")
+    # vumps.psi_r[1] = Q
+    # vumps.C[1] = R
+
+        A = vumps.C[1] * dag(S0)
     U, S, V = svd(A, lind)
     S = pseudo_id(S)
     UV = U * S * V
     replaceind!(UV, lind, uv_l)
     vumps.U_R = UV
-    return nothing
+    err_r = dag(vumps.C[1]) * UV * delta(dag(uv_l), lind) * S0
+    err_r = sqrt(2 * abs(1 - err_r[]))
+    return err_r
 end
 function vumps_canonical_form(vumps::vumps_canonical)
     psi_left = copy(vumps.psi_l)
