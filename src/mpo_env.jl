@@ -193,11 +193,15 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     #perform few power iteration to improve initial guess
 
     L = mpo.L0
-    for i in 1:1
+    step = ini_l ? 1 : 0
+    for i in 1:step
         L, en0 = lproduct(L)
     end
     L, _ = anderson_accelerate(L, lproduct; tol, outputlevel, m = env_dim)
-    mpo.L0 = lproduct(L, rep=replace)[1]
+    # mpo.L0 = lproduct(L, rep=replace)[1]
+    replaceind!(L, dag(lind), rind)
+    replaceind!(L, prime(lind), dag(prime(rind)))
+    mpo.L0 = L
     #################################################
     #
     #             Right Enviroment
@@ -222,10 +226,14 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     end
 
     L = mpo.R0
-    for i in 1:1
+    step = ini_r ? 1 : 0
+    for i in 1:step
         L, en0 = rproduct(L)
     end
     L, _ = anderson_accelerate(L, rproduct; tol, outputlevel, m = env_dim)
-    mpo.R0 = rproduct(L, rep=replace)[1]
+    # mpo.R0 = rproduct(L, rep=replace)[1]
+    replaceind!(L, dag(rind), lind)
+    replaceind!(L, prime(rind), dag(prime(lind)))
+    mpo.R0 = L
     return nothing
 end

@@ -140,7 +140,7 @@ function vumps_bond_left_solve(i::Int, PH, psi_l::MPS, C
     H = PH.H[i]
     phi = psi_l[i]
     #update L 
-    L = L * phi * H * prime(dag(phi))
+    L = (((L * phi) * H) * prime(dag(phi)))
     vals, vecs, info = eigsolve(
         x -> bond_product(L, R, x),
         C,
@@ -167,7 +167,7 @@ function vumps_bond_right_solve(i::Int, PH, psi_r::MPS, C;
     H = PH.H[i]
     phi = psi_r[i]
     #update R 
-    R = R * phi * H * prime(dag(phi))
+    R = (((R * phi) * H )* prime(dag(phi)))
     vals, vecs, info = eigsolve(
         x -> bond_product(L, R, x),
         C,
@@ -215,7 +215,8 @@ function vumps_dmrg3S(
     step=1,
     poi=1,
     vumps=nothing,
-    bond_maxiter=5,
+    bond_maxiter=10,
+    S0=nothing,
     left_to_right=true,
     which_decomp=nothing,
     svd_alg=nothing,
@@ -242,7 +243,7 @@ function vumps_dmrg3S(
     N = length(psi)
 
     # @assert isortho(psi) && orthocenter(psi) == 1
-
+    err = 0.0
     energy = 0.0
     residual = 0.0
     spec = nothing
@@ -250,9 +251,9 @@ function vumps_dmrg3S(
     # central_bond_tensor = nothing
     ha = left_to_right ? 1 : 2
     dx = left_to_right ? 1 : -1
-    order = left_to_right ? (1:N) : (N:-1:1)
     # sites = isiteinds(psi)
     maxtruncerr = 0.0
+    err_bond = 0.0
     sw_time = @elapsed begin
         if !isnothing(write_when_maxdim_exceeds)
             if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
@@ -263,7 +264,7 @@ function vumps_dmrg3S(
         # for b in order
         b = poi
         PH = position!(PH, psi, b)
-        energy, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
+        energy_A, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
         poi_l = b + dx
 
         energy0 = energy
@@ -290,10 +291,14 @@ function vumps_dmrg3S(
             vumps.psi_r[b] = A
             err_bond = abs((energy - energy0) / max(0.1, abs(energy0)))
             energy0 = energy
-            if err_bond < eigsolve_tol || i==bond_maxiter
+            if err_bond < eigsolve_tol / 10 || i == bond_maxiter
                 break
             end
         end
+        err_l = 1 - (dag(phi)*vumps.psi_l[b]*vumps.C[b+1])[]
+        err_r = 1 - (dag(phi)*vumps.psi_r[b]*vumps.C[b])[]
+        err = sqrt(2max(abs(err_l), abs(err_r)))
+        # @show err
         if left_to_right && b != N
             psi[b] = copy(vumps.psi_l[b])
             psi[poi_l] = vumps.C[b+1] * psi[poi_l]
@@ -307,6 +312,12 @@ function vumps_dmrg3S(
             else
                 psi[b] = vumps.psi_r[b] * vumps.C[b]
             end
+        end
+        if b == N
+            S0, err = vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
+        end
+        if b == 1
+            S0, err = vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
         end
         sweep_is_done = (b == 1 && ha == 2)
         ITensorMPS.measure!(
@@ -334,17 +345,19 @@ function vumps_dmrg3S(
         #     sw_time
         # )
         @printf(
-            "Sweep: %i Energy=%s  maxlinkdim=%d residual=%.2E time=%.3f\n",
+            "Sweep: %i Energy_bond=%s  maxlinkdim=%d residual=%.2E bond_err=%.2E time=%.3f\n",
             step,
             energy / length(psi),
+            # energy_A / length(psi),
             maxlinkdim(psi),
             residual,
+            err_bond,
             sw_time
         )
         flush(stdout)
     end
     isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)
-    return (energy, psi, isdone)
+    return (energy, psi, S0, err)
 end
 function vumps_central_bonds(left_to_right::Bool, psi::MPS, C::ITensor,
     PH::iMPO, write_when_maxdim_exceeds=4000)
@@ -381,4 +394,81 @@ function vumps_central_bonds(left_to_right::Bool, psi::MPS, C::ITensor,
         C0 = V
     end
     return psi, central_bonds
+end
+function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
+    # for b in order
+    N = length(psi)
+    b = N
+    L = lproj(PH)
+    phi = vumps.psi_l[N]
+    L = ((L * phi) * PH.H[b]) * prime(dag(phi))
+    R = rproj(PH)
+
+    uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
+    rind = dag(uniqueind(S0, vumps.C[end]))
+    t_ten = delta(dag(uv_r), rind)
+    err = 0
+    eng = 0
+    for i in 1:10
+        err = vumps_gauge_matrix_left!(psi, vumps, S0)
+        uvt = vumps.U_L * t_ten
+        L0 = ((L * prime(dag(uvt))) * uvt)
+        vals, vecs, info = eigsolve(
+            x -> bond_product(L0, R, x),
+            S0,
+            1,
+            :SR;
+            ishermitian=true,
+            tol=eigsolve_tol,
+            krylovdim=30,
+            maxiter=100,
+            eager=true,
+        )
+        S0 = vecs[1]
+        eng_er = abs((eng - vals[1]) / max(0.1, abs(eng)))
+        eng = vals[1]
+        if eng_er < eigsolve_tol
+            break
+        end
+    end
+    return S0, err
+end
+function vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
+    # for b in order
+    N = length(psi)
+    b = 1
+    L = lproj(PH)
+    R = rproj(PH)
+    phi = vumps.psi_r[1]
+    L = ((L * phi) * PH.H[b]) * prime(dag(phi))
+
+    uv_r = uniqueind(vumps.U_R, vumps.psi_r[1])
+    rind = dag(uniqueind(S0, vumps.C[1]))
+    t_ten = delta(dag(uv_r), rind)
+    err = 0
+    eng = 0
+    for i in 1:10
+        err = vumps_gauge_matrix_right!(psi, vumps, S0)
+        uvt = vumps.U_R * t_ten
+        R0 = ((R * prime(dag(uvt))) * uvt)
+        vals, vecs, info = eigsolve(
+            x -> bond_product(L, R0, x),
+            S0,
+            1,
+            :SR;
+            ishermitian=true,
+            tol=eigsolve_tol,
+            krylovdim=30,
+            maxiter=100,
+            eager=true,
+        )
+        S0 = vecs[1]
+        # eng_er = abs((eng - vals[1]) / max(0.1, eng))
+        eng_er = abs((eng - vals[1]) / max(0.1, abs(eng)))
+        eng = vals[1]
+        if eng_er < eigsolve_tol
+            break
+        end
+    end
+    return S0, err
 end

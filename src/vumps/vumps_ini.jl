@@ -132,7 +132,7 @@ function vumps_gauge_matrix_right!(psi::MPS, vumps::vumps_canonical, S0::ITensor
     # vumps.psi_r[1] = Q
     # vumps.C[1] = R
 
-        A = vumps.C[1] * dag(S0)
+    A = vumps.C[1] * dag(S0)
     U, S, V = svd(A, lind)
     S = pseudo_id(S)
     UV = U * S * V
