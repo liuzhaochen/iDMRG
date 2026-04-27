@@ -88,7 +88,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
             nstep += 1
         end
         #nstep: number of local steps
-        maxdim = maxdims[min(s, length(maxdims))]
+        maxdim_global = maxdims[min(s, length(maxdims))]
 
         @printf "======================================\n"
         @printf "iDMRG global step: %i\n" s
@@ -97,6 +97,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
             eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
             # eng_c = 0
             #substract environment energy
+            maxdim = maxdim_global[min(i, length(maxdim_global))]
             energyMPOSubtraction!(mpo, eng_c / Nt)
             eng, psi = solver(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds,
                 kwargs...)

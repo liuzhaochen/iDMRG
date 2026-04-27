@@ -1,6 +1,6 @@
 using Base: info_color
 #solve and expand the bond_dim
-function vumps_dmrg3S(
+function vumps_dmrg(
     H,
     psi0::MPS;
     nsweeps,
@@ -17,111 +17,7 @@ function vumps_dmrg3S(
     setmindim!(sweeps, mindim...)
     setcutoff!(sweeps, cutoff...)
     setnoise!(sweeps, noise...)
-    return vumps_dmrg3S(H, psi0, sweeps; kwargs...)
-end
-function subspace_exp(A, B, PH, b::Int, poi::Int, N::Int, left_to_right::Bool;
-    sweeps, sw, maxtruncerr, adjust_alpha, alpha, alpha_min, rsvd_qn_min_dim)
-
-    LR = nothing
-    if left_to_right
-        LR = lproj(PH)
-        if b == N
-            rinds = uniqueinds(A, PH.R0)
-            ltags = tags(commonind(A, PH.R0))
-        else
-            rinds = uniqueinds(A, B)
-            ltags = tags(commonind(A, B))
-        end
-    else
-        LR = rproj(PH)
-        if b == 1
-            rinds = uniqueinds(A, PH.L0)
-            ltags = tags(commonind(A, PH.L0))
-        else
-            rinds = uniqueinds(A, B)
-            ltags = tags(commonind(A, B))
-
-        end
-    end
-
-    Ua, S, V, spec = svd(A, rinds; lefttags=ltags,
-        maxdim=maxdim(sweeps, sw),
-        mindim=mindim(sweeps, sw),
-        cutoff=cutoff(sweeps, sw),
-    )
-    phi = Ua * S
-    #we can expand to V instead
-    # psi[poi] = V * B
-    #generating random matrix
-    maxtruncerr = max(maxtruncerr, spec.truncerr)
-    if maxtruncerr > 1e-10 && adjust_alpha
-        alpha = max(alpha_min, maxtruncerr) #max(1e-4, maxtruncerr)
-    end
-    W = PH.H[b]
-    com_ind = commonind(V, phi)
-    if left_to_right && b == N
-        w_ind = commonind(PH.R0, W)
-    elseif !left_to_right && b == 1
-        w_ind = commonind(PH.L0, W)
-    else
-        w_ind = commonind(PH.H[poi], W)
-    end
-
-    ind_c = combinedind(combiner(w_ind, com_ind))
-    dim_all = dim(ind_c)
-    dim_phi = dim(com_ind)
-    target_dim = ceil(Int, min(dim_phi, 0.1maxdim(sweeps, sw)))
-    ratio = target_dim / dim_all
-    new_idx = Pair{QN,Int64}[]
-    for sp in ind_c.space
-        push!(new_idx, sp[1] => max(ceil(Int, sp[2] * ratio), rsvd_qn_min_dim))
-    end
-    ind_cnew = Index(new_idx)
-    if dir(ind_cnew) == dir(ind_c)
-        ind_cnew = dag(ind_cnew)
-    end
-    rand_ten = random_itensor(ind_cnew, w_ind, com_ind)
-
-
-    M = (LR * phi) * W
-    noprime!(M)
-    M = M - (M * dag(Ua)) * Ua
-    P = M * rand_ten
-    if b == 1 || b == N
-        cR = commonind(P, W)
-        clk = commonind(P, LR)
-        cR = !isnothing(clk) ? [cR, clk] : cR
-    else
-        cR = [commonind(P, LR), commonind(P, W)]
-    end
-    Q, _ = qr(P, cR)
-    qr_ind = uniqueind(Q, P)
-    MQ = M * dag(Q)
-    bond_dim = dim(ind_cnew)
-    # 10: oversampling parameter 
-    expand_dim = bond_dim > 10 ? bond_dim - 10 : bond_dim
-    U, _ = factorize(MQ, dag(qr_ind), maxdim=
-        min(expand_dim, target_dim),
-        ortho="right", which_decomp="svd")
-    P = Q * U * alpha
-    noprime!(P)
-
-    P_phi_com_idx = commonind(phi, V)
-    #then expand the phi and psi[poi] tensor
-    exp_indx = uniqueind(P, phi)
-    #then expand the phi
-    A, sA = directsum(P => exp_indx, phi => P_phi_com_idx; tags=tags(com_ind))
-    #instead of expanding the next tensor
-    #we expand V matrix 
-    #now, expand the next tensor with zero tensors
-    out_idx = uniqueinds(V, phi)
-    com_idx = commonind(V, phi)
-    zero_ten = ITensor(dag(exp_indx), out_idx)
-    B, sB = directsum(zero_ten => dag(exp_indx), V => com_idx; tags=tags(com_ind))
-    replaceind!(B, sB, sA)
-    #construct one identity matrix 
-    v_id = delta(com_idx, out_idx)
-    return A, B, maxtruncerr, alpha
+    return vumps_dmrg(H, psi0, sweeps; kwargs...)
 end
 function bond_product(L, R, v)
     Pv = L * v * R
@@ -167,7 +63,7 @@ function vumps_bond_right_solve(i::Int, PH, psi_r::MPS, C;
     H = PH.H[i]
     phi = psi_r[i]
     #update R 
-    R = (((R * phi) * H )* prime(dag(phi)))
+    R = (((R * phi) * H) * prime(dag(phi)))
     vals, vecs, info = eigsolve(
         x -> bond_product(L, R, x),
         C,
@@ -208,7 +104,7 @@ function vumps_site_solve(PH, phi;
     phi = vecs[1]
     return energy, phi, residual
 end
-function vumps_dmrg3S(
+function vumps_dmrg(
     PH,
     psi0::MPS,
     sweeps::Sweeps;
@@ -313,10 +209,10 @@ function vumps_dmrg3S(
                 psi[b] = vumps.psi_r[b] * vumps.C[b]
             end
         end
-        if b == N
+        if b == N && left_to_right
             S0, err = vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
         end
-        if b == 1
+        if b == 1 && !left_to_right
             S0, err = vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
         end
         sweep_is_done = (b == 1 && ha == 2)
@@ -395,7 +291,7 @@ function vumps_central_bonds(left_to_right::Bool, psi::MPS, C::ITensor,
     end
     return psi, central_bonds
 end
-function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
+function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r = nothing)
     # for b in order
     N = length(psi)
     b = N
@@ -410,7 +306,7 @@ function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
     err = 0
     eng = 0
     for i in 1:10
-        err = vumps_gauge_matrix_left!(psi, vumps, S0)
+        err = vumps_gauge_matrix_left!(psi, vumps, S0;uv_r)
         uvt = vumps.U_L * t_ten
         L0 = ((L * prime(dag(uvt))) * uvt)
         vals, vecs, info = eigsolve(
@@ -433,14 +329,14 @@ function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
     end
     return S0, err
 end
-function vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
+function vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol, uv_l=nothing)
     # for b in order
     N = length(psi)
     b = 1
     L = lproj(PH)
     R = rproj(PH)
     phi = vumps.psi_r[1]
-    L = ((L * phi) * PH.H[b]) * prime(dag(phi))
+    R = ((R * phi) * PH.H[b]) * prime(dag(phi))
 
     uv_r = uniqueind(vumps.U_R, vumps.psi_r[1])
     rind = dag(uniqueind(S0, vumps.C[1]))
@@ -448,7 +344,7 @@ function vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
     err = 0
     eng = 0
     for i in 1:10
-        err = vumps_gauge_matrix_right!(psi, vumps, S0)
+        err = vumps_gauge_matrix_right!(psi, vumps, S0; uv_l)
         uvt = vumps.U_R * t_ten
         R0 = ((R * prime(dag(uvt))) * uvt)
         vals, vecs, info = eigsolve(

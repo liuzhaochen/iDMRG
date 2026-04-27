@@ -1,5 +1,6 @@
 #a poor man's vumps
 include("vumps_ini.jl")
+include("vumps_dmrg.jl")
 function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
     Nsite = length(mpo)
     site_inds = isiteinds(psi_left)
@@ -57,7 +58,7 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
     return psi
 end
 function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObserver(), env_dim=5,
-    eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
+    eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing, algorithm="vumps",
     tol=(x -> max(1e-12, x / 100)), kwargs...)
     #note, this method does not work for pure product state
     #using iDMRG to prepare initial state
@@ -78,8 +79,11 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
         obs = local_step_checkdone(; eng_tol=1e-12)
     end
     isdone = false
-    solver = mpo.nsite == 1 ? vumps_dmrg3S : error("only support singe site version")
-    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter, :bond_maxiter) : (:eigsolve_maxiter,)
+    if mpo.nsite != 1
+        error("only support singe site version")
+    end
+    solver = algorithm == "vumps" ? vumps_dmrg : vumps_dmrg3S
+    allowed_keys = (:expansion, :eigsolve_maxiter, :bond_maxiter)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     eng = 0
     eng_c = 0
@@ -91,13 +95,13 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
         left_to_right = isodd(j)
         order = left_to_right ? (1:Nt) : (Nt:-1:1)
         eng_tol = tol(err)
+        @printf "Canoncial Error at step %i :%.2E\n" step err
         for b in order
-            @printf "Canoncial Error at step %i :%.2E\n" step err
             step += 1
             #substract environment energy
             eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng, psi, S0, err = solver(mpo, psi; step, vumps, left_to_right, S0,
+            eng, psi, S0 = solver(mpo, psi; step, vumps, left_to_right, S0,
                 poi=b, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
                 kwargs...)
             #undo environment energy subtract in hamiltonian
@@ -111,7 +115,22 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
             # if b == 1
             #     err = vumps_gauge_matrix_right!(psi, vumps, S0)
             # end
-            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100))
+            if (b == Nt && left_to_right) || (b == 1 && !left_to_right)
+                psi, err = vumps_canonical_form(psi, S0, vumps; poi=b)
+            end
+            ini_l = false
+            ini_r = false
+            if algorithm == "vumps"
+                psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100))
+            else
+                if haskey(kwargs, :expansion)
+                    if kwargs[:expansion] && ((b == Nt && left_to_right) || (b == 1 && !left_to_right))
+                        ini_l = !left_to_right
+                        ini_r = left_to_right
+                    end
+                end
+                psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), ini_l, ini_r)
+            end
         end
         GC.gc(true)
         isdone && break

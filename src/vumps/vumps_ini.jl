@@ -97,9 +97,12 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     R_ten_r = nothing
     return psi, sqrt(2 * max(abs(error_l), abs(error_r)))
 end
-function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor)
+function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor;
+    uv_r = nothing)
     #using psi to update boundary bond tensor
-    uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
+    if isnothing(uv_r)
+        uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
+    end
     rind = dag(uniqueind(S0, vumps.C[end]))
     # N = length(psi)
     # lind = (commonind(psi[end], psi[end-1]), isiteinds(psi)[N])
@@ -121,17 +124,19 @@ function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor)
     err_r = sqrt(2 * abs(1 - err_r[]))
     return err_r
 end
-function vumps_gauge_matrix_right!(psi::MPS, vumps::vumps_canonical, S0::ITensor)
+function vumps_gauge_matrix_right!(psi::MPS, vumps::vumps_canonical, S0::ITensor;
+    uv_l=nothing)
     #we might want to get a new rotation matrix U_L and U_R based on
     #current S0
-    uv_l = uniqueind(vumps.U_R, vumps.psi_r[1])
+    if isnothing(uv_l)
+        uv_l = uniqueind(vumps.U_R, vumps.psi_r[1])
+    end
     lind = dag(uniqueind(S0, vumps.C[1]))
 
     # rind = (commonind(psi[1], psi[2]), isiteinds(psi)[1])
     # Q, R = factorize(psi[1], rind; tags="cLink,1", which_decomp="qr")
     # vumps.psi_r[1] = Q
     # vumps.C[1] = R
-
     A = vumps.C[1] * dag(S0)
     U, S, V = svd(A, lind)
     S = pseudo_id(S)
