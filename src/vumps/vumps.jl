@@ -121,7 +121,6 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
             ini_l = false
             ini_r = false
             if algorithm == "vumps"
-                psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100))
             else
                 if haskey(kwargs, :expansion)
                     if kwargs[:expansion] && ((b == Nt && left_to_right) || (b == 1 && !left_to_right))
@@ -129,8 +128,8 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
                         ini_r = left_to_right
                     end
                 end
-                psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), ini_l, ini_r)
             end
+            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), ini_l, ini_r)
         end
         GC.gc(true)
         isdone && break

@@ -7,26 +7,28 @@ function subspace_exp(A, B, PH, b::Int, poi::Int, N::Int, left_to_right::Bool;
         LR = lproj(PH)
         if b == N
             rinds = uniqueinds(A, PH.R0)
+            lind = commonind(A, PH.R0)
             ltags = tags(commonind(A, PH.R0))
         else
             rinds = uniqueinds(A, B)
+            lind = commonind(A, B)
             ltags = tags(commonind(A, B))
         end
     else
         LR = rproj(PH)
         if b == 1
             rinds = uniqueinds(A, PH.L0)
+            lind = commonind(A, PH.L0)
             ltags = tags(commonind(A, PH.L0))
         else
             rinds = uniqueinds(A, B)
+            lind = commonind(A, B)
             ltags = tags(commonind(A, B))
-
         end
     end
 
     Ua, S, V, spec = svd(A, rinds; lefttags=ltags,
         maxdim=maxdim(sweeps, sw),
-        mindim=mindim(sweeps, sw),
         cutoff=cutoff(sweeps, sw),
     )
     phi = Ua * S
@@ -34,8 +36,8 @@ function subspace_exp(A, B, PH, b::Int, poi::Int, N::Int, left_to_right::Bool;
     # psi[poi] = V * B
     #generating random matrix
     maxtruncerr = max(maxtruncerr, spec.truncerr)
-    if maxtruncerr > 1e-10 && adjust_alpha
-        alpha = max(alpha_min, maxtruncerr) #max(1e-4, maxtruncerr)
+    if adjust_alpha && dim(lind)>maxdim(sweeps, sw)
+        alpha = max(alpha_min, maxtruncerr)
     end
     W = PH.H[b]
     com_ind = commonind(V, phi)
@@ -149,7 +151,7 @@ function vumps_dmrg3S(
     rsvd_qn_min_dim=2,
     rsvd_power_iteration=0,
     expansion=true,
-    alpha=2e-2,
+    alpha=1e-4,
     alpha_min=1e-8,
     adjust_alpha=true,
 )
@@ -189,8 +191,12 @@ function vumps_dmrg3S(
         if (left_to_right && b != N) || (!left_to_right && b != 1)
             B = psi[poi_l]
         end
-        phi, V, maxtruncerr, alpha = subspace_exp(phi, B, PH, b, poi_l, N, left_to_right;
+        if expansion
+            phi, V, maxtruncerr, alpha = subspace_exp(phi, B, PH, b, poi_l, N, left_to_right;
             sweeps, sw, maxtruncerr, adjust_alpha, alpha, alpha_min, rsvd_qn_min_dim)
+        else
+            V = ITensor(1.0)
+        end
         #V contain expaned indices
         if (left_to_right && b != N) || (!left_to_right && b != 1)
             psi[poi_l] = V * psi[poi_l]
@@ -253,12 +259,13 @@ function vumps_dmrg3S(
     end
     if outputlevel >= 1
         @printf(
-            "Sweep: %i Energy=%s  maxlinkdim=%d residual=%.2E maxerr=%.2E time=%.3f\n",
+            "Sweep: %i Energy=%s  maxlinkdim=%d residual=%.2E maxerr=%.2E mixer=%.2E time=%.3f\n",
             step,
             energy / length(psi),
             maxlinkdim(psi),
             residual,
             maxtruncerr,
+            alpha,
             sw_time
         )
         flush(stdout)

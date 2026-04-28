@@ -130,7 +130,7 @@ function random_ini!(psi0::MPS)
     #apply a random gate to the position where psi0 is disconnected
     sites = isiteinds(psi0)
     N = length(psi0)
-    for l in 1:5
+    for l in 1:1
         orthogonalize!(psi0, 1)
         normalize!(psi0)
         for i in 1:2:N-1
