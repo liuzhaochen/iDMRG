@@ -19,6 +19,57 @@ function vumps_dmrg(
     setnoise!(sweeps, noise...)
     return vumps_dmrg(H, psi0, sweeps; kwargs...)
 end
+function vumps_makeL!(P, psi, k)
+    ll = P.lpos
+    if ll ≥ k
+        # Special case when nothing has to be done.
+        # Still need to change the position if lproj is
+        # being moved backward.
+        P.lpos = k
+        return nothing
+    end
+    # Make sure ll is at least 0 for the generic logic below
+    ll = max(ll, 0)
+    L = lproj(P)
+    while ll < k
+        L = L * psi[ll+1] * P.H[ll+1] * dag(prime(psi[ll+1]))
+        # P.LR[ll+1] = L
+        ll += 1
+    end
+    P.LR[k] = L
+    # Needed when moving lproj backward.
+    P.lpos = k
+    return P
+end
+function vumps_makeR!(P, psi, k)
+    rl = P.rpos
+    if rl ≤ k
+        # Special case when nothing has to be done.
+        # Still need to change the position if rproj is
+        # being moved backward.
+        P.rpos = k
+        return nothing
+    end
+    N = length(P.H)
+    # Make sure rl is no bigger than `N + 1` for the generic logic below
+    rl = min(rl, N + 1)
+    R = rproj(P)
+    while rl > k
+        R = R * psi[rl - 1] * P.H[rl - 1] * dag(prime(psi[rl - 1]))
+        # P.LR[rl - 1] = R
+        rl -= 1
+    end
+    P.LR[k] = R
+    P.rpos = k
+    return R
+end
+function vumps_position!(P::AbstractProjMPO, psi::MPS, pos::Int)
+    #construct left-and right environment
+    vumps_makeL!(P, psi, pos - 1)
+    vumps_makeR!(P, psi, pos + nsite(P))
+    return P
+end
+
 function bond_product(L, R, v)
     Pv = L * v * R
     return noprime!(Pv)
@@ -151,15 +202,16 @@ function vumps_dmrg(
     maxtruncerr = 0.0
     err_bond = 0.0
     sw_time = @elapsed begin
-        if !isnothing(write_when_maxdim_exceeds)
-            if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
-               (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
-                PH = disk(PH; path=write_path)
-            end
-        end
+        # if !isnothing(write_when_maxdim_exceeds)
+        #     if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
+        #        (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
+        #         PH = disk(PH; path=write_path)
+        #     end
+        # end
         # for b in order
         b = poi
-        PH = position!(PH, psi, b)
+        #as every time, the env is recalculated, no need to store every LR here
+        PH = vumps_position!(PH, psi, b)
         energy_A, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
         poi_l = b + dx
 
@@ -210,10 +262,10 @@ function vumps_dmrg(
             end
         end
         if b == N && left_to_right
-            S0, err = vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
+            # S0, err = vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
         end
         if b == 1 && !left_to_right
-            S0, err = vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
+            # S0, err = vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
         end
         sweep_is_done = (b == 1 && ha == 2)
         ITensorMPS.measure!(
@@ -230,21 +282,10 @@ function vumps_dmrg(
         )
     end
     if outputlevel >= 1
-        # @printf(
-        #     "Sweep: %i Energy=%s  maxlinkdim=%d maxerr=%.2E mixer=%.2E residual=%.2E time=%.3f\n",
-        #     step,
-        #     energy / length(psi),
-        #     maxlinkdim(psi),
-        #     maxtruncerr,
-        #     alpha,
-        #     residual,
-        #     sw_time
-        # )
         @printf(
             "Sweep: %i Energy_bond=%s  maxlinkdim=%d residual=%.2E bond_err=%.2E time=%.3f\n",
             step,
             energy / length(psi),
-            # energy_A / length(psi),
             maxlinkdim(psi),
             residual,
             err_bond,
@@ -255,43 +296,7 @@ function vumps_dmrg(
     isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)
     return (energy, psi, S0, err)
 end
-function vumps_central_bonds(left_to_right::Bool, psi::MPS, C::ITensor,
-    PH::iMPO, write_when_maxdim_exceeds=4000)
-    #solving the corresponding central site problem
-    #construct temperal env
-    psi = copy(psi)
-    N = length(psi)
-    order = left_to_right ? (N:-1:1) : (1:N)
-    dx = left_to_right ? -1 : 1
-    C0 = C
-    central_bonds = Vector{ITensor}(undef, N)
-    for b in order
-        # PH = position!(PH, psi, b)
-        # L = lproj(PH)
-        # R = rproj(PH)
-        #update L
-        # L = L * psi[b] * PH.H[b] * prime(dag(psi[b]))
-        central_bonds[b] = C0
-        A = C0 * psi[b]
-        if left_to_right && b == 1
-            psi[b] = A
-            break
-        end
-        if !left_to_right && b == N
-            psi[b] = A
-            break
-        end
-        #shift bond to next position
-        B = psi[b+dx]
-        rinds = uniqueinds(A, B)
-        ltags = tags(commonind(A, B))
-        U, V = factorize(A, rinds; tags=ltags, ortho="left", which_decomp="qr")
-        psi[b] = U
-        C0 = V
-    end
-    return psi, central_bonds
-end
-function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r = nothing)
+function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r=nothing)
     # for b in order
     N = length(psi)
     b = N
@@ -306,7 +311,7 @@ function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r = nothing)
     err = 0
     eng = 0
     for i in 1:10
-        err = vumps_gauge_matrix_left!(psi, vumps, S0;uv_r)
+        err = vumps_gauge_matrix_left!(psi, vumps, S0; uv_r)
         uvt = vumps.U_L * t_ten
         L0 = ((L * prime(dag(uvt))) * uvt)
         vals, vecs, info = eigsolve(

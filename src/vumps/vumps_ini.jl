@@ -68,6 +68,11 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     U, S, V = svd(A, commonind(A, vumps.psi_l[N]))
     S = pseudo_id(S)
     UV = U * S * V
+    #update far right bond 
+    vumps.psi_l[N] = vumps.psi_l[N]*UV
+    vumps.C[N+1] = copy(S0)
+    replaceind!(vumps.psi_l[N], rind, rnew)
+    replaceind!(vumps.C[N+1],dag(rind), dag(rnew))
     replaceind!(UV, rind, rnew)
     vumps.U_L = UV
     S = copy(S0)
@@ -79,7 +84,11 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     U, S, V = svd(A, commonind(A, vumps.psi_r[1]))
     S = pseudo_id(S)
     UV = U * S * V
-
+    #update fart right bond 
+    vumps.psi_r[1] = vumps.psi_r[1]*UV
+    vumps.C[1] = copy(S0)
+    replaceind!(vumps.psi_r[1], lind, lnew)
+    replaceind!(vumps.C[1],dag(lind), dag(lnew))
     replaceind!(UV, lind, lnew)
     vumps.U_R = UV
     S = copy(S0)
@@ -89,7 +98,7 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     #get new mixed canonical tensor
     psi = copy(vumps.psi_r)
     for i in 1:poi-1
-        psi[i] = vumps.psi_l[i]
+        psi[i] = copy(vumps.psi_l[i])
     end
     psi[poi] = psi[poi] * vumps.C[poi]
 
@@ -150,8 +159,8 @@ end
 function vumps_canonical_form(vumps::vumps_canonical)
     psi_left = copy(vumps.psi_l)
     psi_right = copy(vumps.psi_r)
-    psi_left[end] = psi_left[end] * vumps.U_L
-    psi_right[1] = psi_right[1] * vumps.U_R
+    # psi_left[end] = psi_left[end] * vumps.U_L
+    # psi_right[1] = psi_right[1] * vumps.U_R
 
     return psi_left, psi_right
 end
