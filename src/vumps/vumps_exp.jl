@@ -201,6 +201,11 @@ function vumps_dmrg(
     # sites = isiteinds(psi)
     maxtruncerr = 0.0
     err_bond = 0.0
+    is_boundary = false
+    
+    if (left_to_right && poi == N) || (!left_to_right && poi ==1 )
+        is_boundary = true
+    end
     sw_time = @elapsed begin
         # if !isnothing(write_when_maxdim_exceeds)
         #     if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
@@ -216,6 +221,9 @@ function vumps_dmrg(
         poi_l = b + dx
 
         energy0 = energy
+        if is_boundary
+            @goto Next
+        end
         for i in 1:bond_maxiter
             #two steps for bond matrix
             #such that L*C_2 = A = C_1 * R
@@ -239,7 +247,7 @@ function vumps_dmrg(
             vumps.psi_r[b] = A
             err_bond = abs((energy - energy0) / max(0.1, abs(energy0)))
             energy0 = energy
-            if err_bond < eigsolve_tol / 10 || i == bond_maxiter
+            if err_bond < eigsolve_tol / 10
                 break
             end
         end
@@ -247,6 +255,7 @@ function vumps_dmrg(
         err_r = 1 - (dag(phi)*vumps.psi_r[b]*vumps.C[b])[]
         err = sqrt(2max(abs(err_l), abs(err_r)))
         # @show err
+        @label Next
         if left_to_right && b != N
             psi[b] = copy(vumps.psi_l[b])
             psi[poi_l] = vumps.C[b+1] * psi[poi_l]
@@ -254,12 +263,12 @@ function vumps_dmrg(
             psi[b] = copy(vumps.psi_r[b])
             psi[poi_l] = vumps.C[b] * psi[poi_l]
         else
-            if left_to_right
-                # psi[b] = phi
-                psi[b] = vumps.psi_l[b] * vumps.C[b+1]
-            else
-                psi[b] = vumps.psi_r[b] * vumps.C[b]
-            end
+            psi[b] = phi
+            # if left_to_right
+            #     psi[b] = vumps.psi_l[b] * vumps.C[b+1]
+            # else
+            #     psi[b] = vumps.psi_r[b] * vumps.C[b]
+            # end
         end
         if b == N && left_to_right
             # S0, err = vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
@@ -285,7 +294,7 @@ function vumps_dmrg(
         @printf(
             "Sweep: %i Energy_bond=%s  maxlinkdim=%d residual=%.2E bond_err=%.2E time=%.3f\n",
             step,
-            energy / length(psi),
+            energy_A / length(psi),
             maxlinkdim(psi),
             residual,
             err_bond,

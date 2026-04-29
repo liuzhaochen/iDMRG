@@ -136,7 +136,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         isdone && break
         #reinitialize environment
         if s != nstep_max
-            psi,_ = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0 = 1e-12)
+            psi,_ = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0 = 1e-12, ini_l = false, ini_r = false)
         end
         GC.gc(true)
     end
