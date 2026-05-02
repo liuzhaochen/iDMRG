@@ -164,3 +164,13 @@ function vumps_canonical_form(vumps::vumps_canonical)
 
     return psi_left, psi_right
 end
+function vumps_S_matrix_overlap(S0::ITensor, vumps::vumps_canonical)
+    lind = uniqueind(vumps.C[1], S0)
+    rind = uniqueind(S0, vumps.C[1])
+    overlap_1 = (dag(S0)*delta(rind, dag(lind)) * vumps.C[1])[]
+    
+    lind = uniqueind(vumps.C[end], S0)
+    rind = uniqueind(S0, vumps.C[end])
+    overlap_2 = (dag(S0)*delta(rind, dag(lind)) * vumps.C[end])[]
+    return 1-min(abs(overlap_1), abs(overlap_2))
+end

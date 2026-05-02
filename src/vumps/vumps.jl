@@ -106,7 +106,7 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
             #substract environment energy
             eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng, psi, S0 = solver(mpo, psi; step, vumps, left_to_right, S0,
+            eng, psi, S0, err = solver(mpo, psi; step, vumps, left_to_right, S0,
                 poi=b, nsweeps, maxdim, cutoff, eigsolve_krylovdim, eigsolve_maxiter, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=eng_tol,
                 kwargs...)
             #undo environment energy subtract in hamiltonian
@@ -114,8 +114,12 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
             isdone = checkdone!(observer; eng_density=eng / Nt, step=(0, step), psi, S0)
             isdone && break
             #reinitialize the enviroment with updated psi_left and psi_right (global update)
-            if ((b == Nt && left_to_right) || (b == 1 && !left_to_right)) && global_update
-                psi, err = vumps_canonical_form(psi, S0, vumps; poi=b)
+            if ((b == Nt && left_to_right) || (b == 1 && !left_to_right))
+                F = vumps_S_matrix_overlap(S0, vumps)
+                @printf "Overlap Error at step %i :%.2E\n" step F
+                if global_update
+                    psi, err = vumps_canonical_form(psi, S0, vumps; poi=b)
+                end
             end
             ini_l = false
             ini_r = false

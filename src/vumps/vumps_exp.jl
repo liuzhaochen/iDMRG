@@ -220,9 +220,9 @@ function vumps_dmrg(
         energy_A, phi, residual = vumps_site_solve(PH, psi[b]; residual, eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
         poi_l = b + dx
 
-        energy0 = energy
-        if is_boundary
-            @goto Next
+        energy0 = energy_A
+        if is_boundary && bond_maxiter!=1
+            # @goto Next
         end
         for i in 1:bond_maxiter
             #two steps for bond matrix
@@ -302,8 +302,8 @@ function vumps_dmrg(
         )
         flush(stdout)
     end
-    isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)
-    return (energy, psi, S0, err)
+    isdone = ITensorMPS.checkdone!(observer; energy = energy_A, psi, sweep=sw, outputlevel)
+    return (energy_A, psi, S0, err)
 end
 function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r=nothing)
     # for b in order
