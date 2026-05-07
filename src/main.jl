@@ -7,6 +7,7 @@ using KrylovKit: eigsolve
 using Printf
 
 import ITensors: DiskVector
+using ITensors: contract!
 include("utilities.jl")
 include("iMPO.jl")
 include("iMPO_disk.jl")
@@ -20,3 +21,4 @@ include("transfer_matrix.jl")
 
 include("vumps/vumps_exp.jl")
 include("vumps/vumps.jl")
+include("contract.jl")

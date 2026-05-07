@@ -1,4 +1,21 @@
 
+function mpo_product(L, R, Lv, LHv, H, v)
+    #using in-place version
+    # v1 = noprime!((L*v)*R)
+    if !isempty(commoninds(L, v))
+        Lv = contract!(Lv, L, v, 1.0, 0.0)
+    else
+        Lv = L*v
+    end
+    LHv = contract!(LHv, Lv, H, 1.0, 0.0)
+    v1 = noprime!(LHv*R)
+    return v1
+end
+function mpo_product(L, R, v)
+    #using in-place version
+    v1 = noprime!((L*v)*R)
+    return v1
+end
 function pseudo_id(lambda)
     #changte lambda into identity matrix
     if lambda == ITensor(1.0)
@@ -74,26 +91,6 @@ function isiteinds(psi)
         end
     end
     return unique(idx)
-end
-function lambdamodule(l1, l2)
-    return 0
-    # size1 = size(l1, 1)
-    # size2 = size(l2, 1)
-    # largel1 = Float64[]
-    # largel2 = Float64[]
-    # for i = 1:size1
-    #     push!(largel1, l1[i, i])
-    # end
-    # sort!(largel1)
-    # for i = 1:size2
-    #     push!(largel2, l2[i, i])
-    # end
-    # sort!(largel2)
-    # ove = 0
-    # for i in 1:min(size1, size2)
-    #     ove += largel1[i] * largel2[i]
-    # end
-    # return ove
 end
 function filter_kwargs(kws, allowed)
     # clean_kwargs = Dict(k => v for (k, v) in kws if k in allowed)

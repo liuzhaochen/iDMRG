@@ -21,27 +21,30 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     else
         lambda = denseblocks(copy(lambda))
     end
-    # @show lind,rind
-    function central_product(v)
-        Pv = (P.L0 * v) * P.R0
-        return noprime(Pv)
+    #cache
+    Lv = P.L0 * lambda
+    function central_product(v, Lv, P)
+        # Pv = (P.L0 * v) * P.R0
+        Lv0 = contract!(Lv, P.L0, v, 1.0, 0.0)
+        Pv = Lv0 * P.R0
+        return noprime!(Pv)
     end
 
     lind, rind = mpo_env_linkinds(psi, P)
     replaceind!(P.R0, rind, dag(lind))
     #make sure P.R0 and P.L0 share the same link index
-    vals, vecs = eigsolve(
-        x -> central_product(x),
+    vals, vecs, info = eigsolve(
+        x -> central_product(x, Lv, P),
         lambda,
         1,
         :SR;
         ishermitian=true,
         tol=1e-14,
-        krylovdim=20,
+        krylovdim=30,
         maxiter=200,
-        verbosity=0
+        verbosity=0,
+        eager=true,
     )
-    #undo
     replaceind!(P.R0, dag(lind), rind)
 
     return vals[1], vecs[1]

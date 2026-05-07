@@ -55,7 +55,7 @@ function vumps_makeR!(P, psi, k)
     rl = min(rl, N + 1)
     R = rproj(P)
     while rl > k
-        R = R * psi[rl - 1] * P.H[rl - 1] * dag(prime(psi[rl - 1]))
+        R = R * psi[rl-1] * P.H[rl-1] * dag(prime(psi[rl-1]))
         # P.LR[rl - 1] = R
         rl -= 1
     end
@@ -137,8 +137,16 @@ function vumps_site_solve(PH, phi;
     eigsolve_verbosity=0,
     eigsolve_which_eigenvalue=:SR,
     ishermitian=true)
+    L = lproj(PH)
+    R = rproj(PH)
+    #allocate relevant tensor
+    Lv = L * phi
+    LHv = Lv * PH.H[PH.lpos+1]
+    H0 = PH.H[PH.lpos+1]
+    #using in-place contract! in mpo_product
     vals, vecs, info = eigsolve(
-        PH,
+        x -> mpo_product(L, R, Lv, LHv, H0, x),
+        # PH,
         phi,
         1,
         eigsolve_which_eigenvalue;
@@ -202,8 +210,8 @@ function vumps_dmrg(
     maxtruncerr = 0.0
     err_bond = 0.0
     is_boundary = false
-    
-    if (left_to_right && poi == N) || (!left_to_right && poi ==1 )
+
+    if (left_to_right && poi == N) || (!left_to_right && poi == 1)
         is_boundary = true
     end
     sw_time = @elapsed begin
@@ -221,7 +229,7 @@ function vumps_dmrg(
         poi_l = b + dx
 
         energy0 = energy_A
-        if is_boundary && bond_maxiter!=1
+        if is_boundary && bond_maxiter != 1
             # @goto Next
         end
         for i in 1:bond_maxiter
@@ -232,28 +240,34 @@ function vumps_dmrg(
             eng_2, C_2 = vumps_bond_left_solve(b, PH, vumps.psi_l, vumps.C[b+1]; eigsolve_tol)
             vumps.C[b+1] = C_2
 
-            A = phi * dag(C_2)
+            # A = phi * dag(C_2)
+            contract!(vumps.psi_l[b], phi, dag(C_2))
             linds = uniqueinds(phi, dag(C_2))
-            U, S, V = svd(A, linds)
+            U, S, V = svd(vumps.psi_l[b], linds)
             S = pseudo_id(S)
-            A = U * S * V
-            vumps.psi_l[b] = A
+            # A = U * S * V
+            # vumps.psi_l[b] = A
+            contract!(vumps.psi_l[b], U, S * V)
 
-            A = phi * dag(C_1)
+            # A = phi * dag(C_1)
+            contract!(vumps.psi_r[b], phi, dag(C_1))
             linds = uniqueinds(phi, dag(C_1))
-            U, S, V = svd(A, linds)
+            U, S, V = svd(vumps.psi_r[b], linds)
             S = pseudo_id(S)
-            A = U * S * V
-            vumps.psi_r[b] = A
+            # A = U * S * V
+            # vumps.psi_r[b] = A
+            contract!(vumps.psi_r[b], U, S * V)
             err_bond = abs((energy - energy0) / max(0.1, abs(energy0)))
             energy0 = energy
             if err_bond < eigsolve_tol / 10
                 break
             end
         end
-        err_l = 1 - (dag(phi)*vumps.psi_l[b]*vumps.C[b+1])[]
-        err_r = 1 - (dag(phi)*vumps.psi_r[b]*vumps.C[b])[]
-        err = sqrt(2max(abs(err_l), abs(err_r)))
+        if bond_maxiter == 1
+            err_l = 1 - (dag(phi)*vumps.psi_l[b]*vumps.C[b+1])[]
+            err_r = 1 - (dag(phi)*vumps.psi_r[b]*vumps.C[b])[]
+            err = sqrt(2max(abs(err_l), abs(err_r)))
+        end
         # @show err
         @label Next
         if left_to_right && b != N
@@ -302,83 +316,83 @@ function vumps_dmrg(
         )
         flush(stdout)
     end
-    isdone = ITensorMPS.checkdone!(observer; energy = energy_A, psi, sweep=sw, outputlevel)
+    isdone = ITensorMPS.checkdone!(observer; energy=energy_A, psi, sweep=sw, outputlevel)
     return (energy_A, psi, S0, err)
 end
-function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r=nothing)
-    # for b in order
-    N = length(psi)
-    b = N
-    L = lproj(PH)
-    phi = vumps.psi_l[N]
-    L = ((L * phi) * PH.H[b]) * prime(dag(phi))
-    R = rproj(PH)
+# function vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol, uv_r=nothing)
+#     # for b in order
+#     N = length(psi)
+#     b = N
+#     L = lproj(PH)
+#     phi = vumps.psi_l[N]
+#     L = ((L * phi) * PH.H[b]) * prime(dag(phi))
+#     R = rproj(PH)
 
-    uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
-    rind = dag(uniqueind(S0, vumps.C[end]))
-    t_ten = delta(dag(uv_r), rind)
-    err = 0
-    eng = 0
-    for i in 1:10
-        err = vumps_gauge_matrix_left!(psi, vumps, S0; uv_r)
-        uvt = vumps.U_L * t_ten
-        L0 = ((L * prime(dag(uvt))) * uvt)
-        vals, vecs, info = eigsolve(
-            x -> bond_product(L0, R, x),
-            S0,
-            1,
-            :SR;
-            ishermitian=true,
-            tol=eigsolve_tol,
-            krylovdim=30,
-            maxiter=100,
-            eager=true,
-        )
-        S0 = vecs[1]
-        eng_er = abs((eng - vals[1]) / max(0.1, abs(eng)))
-        eng = vals[1]
-        if eng_er < eigsolve_tol
-            break
-        end
-    end
-    return S0, err
-end
-function vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol, uv_l=nothing)
-    # for b in order
-    N = length(psi)
-    b = 1
-    L = lproj(PH)
-    R = rproj(PH)
-    phi = vumps.psi_r[1]
-    R = ((R * phi) * PH.H[b]) * prime(dag(phi))
+#     uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
+#     rind = dag(uniqueind(S0, vumps.C[end]))
+#     t_ten = delta(dag(uv_r), rind)
+#     err = 0
+#     eng = 0
+#     for i in 1:10
+#         err = vumps_gauge_matrix_left!(psi, vumps, S0; uv_r)
+#         uvt = vumps.U_L * t_ten
+#         L0 = ((L * prime(dag(uvt))) * uvt)
+#         vals, vecs, info = eigsolve(
+#             x -> bond_product(L0, R, x),
+#             S0,
+#             1,
+#             :SR;
+#             ishermitian=true,
+#             tol=eigsolve_tol,
+#             krylovdim=30,
+#             maxiter=100,
+#             eager=true,
+#         )
+#         S0 = vecs[1]
+#         eng_er = abs((eng - vals[1]) / max(0.1, abs(eng)))
+#         eng = vals[1]
+#         if eng_er < eigsolve_tol
+#             break
+#         end
+#     end
+#     return S0, err
+# end
+# function vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol, uv_l=nothing)
+#     # for b in order
+#     N = length(psi)
+#     b = 1
+#     L = lproj(PH)
+#     R = rproj(PH)
+#     phi = vumps.psi_r[1]
+#     R = ((R * phi) * PH.H[b]) * prime(dag(phi))
 
-    uv_r = uniqueind(vumps.U_R, vumps.psi_r[1])
-    rind = dag(uniqueind(S0, vumps.C[1]))
-    t_ten = delta(dag(uv_r), rind)
-    err = 0
-    eng = 0
-    for i in 1:10
-        err = vumps_gauge_matrix_right!(psi, vumps, S0; uv_l)
-        uvt = vumps.U_R * t_ten
-        R0 = ((R * prime(dag(uvt))) * uvt)
-        vals, vecs, info = eigsolve(
-            x -> bond_product(L, R0, x),
-            S0,
-            1,
-            :SR;
-            ishermitian=true,
-            tol=eigsolve_tol,
-            krylovdim=30,
-            maxiter=100,
-            eager=true,
-        )
-        S0 = vecs[1]
-        # eng_er = abs((eng - vals[1]) / max(0.1, eng))
-        eng_er = abs((eng - vals[1]) / max(0.1, abs(eng)))
-        eng = vals[1]
-        if eng_er < eigsolve_tol
-            break
-        end
-    end
-    return S0, err
-end
+#     uv_r = uniqueind(vumps.U_R, vumps.psi_r[1])
+#     rind = dag(uniqueind(S0, vumps.C[1]))
+#     t_ten = delta(dag(uv_r), rind)
+#     err = 0
+#     eng = 0
+#     for i in 1:10
+#         err = vumps_gauge_matrix_right!(psi, vumps, S0; uv_l)
+#         uvt = vumps.U_R * t_ten
+#         R0 = ((R * prime(dag(uvt))) * uvt)
+#         vals, vecs, info = eigsolve(
+#             x -> bond_product(L, R0, x),
+#             S0,
+#             1,
+#             :SR;
+#             ishermitian=true,
+#             tol=eigsolve_tol,
+#             krylovdim=30,
+#             maxiter=100,
+#             eager=true,
+#         )
+#         S0 = vecs[1]
+#         # eng_er = abs((eng - vals[1]) / max(0.1, eng))
+#         eng_er = abs((eng - vals[1]) / max(0.1, abs(eng)))
+#         eng = vals[1]
+#         if eng_er < eigsolve_tol
+#             break
+#         end
+#     end
+#     return S0, err
+# end

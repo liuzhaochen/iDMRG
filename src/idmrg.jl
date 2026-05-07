@@ -1,5 +1,5 @@
 
-function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing, err_0 = nothing, 
+function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing, err_0=nothing,
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
@@ -16,8 +16,8 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         err = max(err_l, err_r)
         @printf "Canoncial Error :%s\n" err
         flush(stdout)
-        err_0 = isnothing(err_0) ? 1e-4*err : err_0
-        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol = max(1e-12, err_0))
+        err_0 = isnothing(err_0) ? 1e-4 * err : err_0
+        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol=max(1e-12, err_0))
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -58,7 +58,7 @@ function ITensorMPS.checkdone!(o::local_step_checkdone; kwargs...)
     return false
 end
 function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff, observer=NoObserver(),
-    eigsolve_krylovdim=3, tol=1e-12, eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds=nothing, kwargs...)
+    eigsolve_krylovdim=3, tol=(x->min(1e-5, max(1e-12, x/100))), eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds=nothing, kwargs...)
     Nt = length(mpo)
     swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
     sites = isiteinds(mpo.H)
@@ -69,7 +69,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     H_ini = mpo.H0
 
     S0 = ipsi.S0
-    psi,_ = initializeIMPO!(psi, H_ini, mpo, S0=S0, err_0 = 1e-12)
+    psi, err = initializeIMPO!(psi, H_ini, mpo, S0=S0, err_0=1e-12)
     S = S0
     eng_density = 0
     if isnothing(obs)
@@ -78,7 +78,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     #using sweeps system for global steps
     isdone = false
     solver = mpo.nsite == 1 ? dmrg3SRSVD : dmrg
-    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter) : (:eigsolve_maxiter,)
+    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter, :alpha) : (:eigsolve_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     for s in 1:nstep_max
         #nsteps = global step
@@ -99,7 +99,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
             #substract environment energy
             maxdim = maxdim_global[min(i, length(maxdim_global))]
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng, psi = solver(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds,
+            eng, psi = solver(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=tol(err),
                 kwargs...)
             # if i == 1
             #undo environment energy subtract in hamiltonian
@@ -136,9 +136,9 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         isdone && break
         #reinitialize environment
         if s != nstep_max
-            psi,_ = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0 = 1e-12, ini_l = false, ini_r = false)
+            psi, err = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0=1e-12, ini_l=false, ini_r=false)
         end
-        GC.gc(true)
+        # GC.gc(true)
     end
     ipsi.psi = psi
     ipsi.S0 = S0

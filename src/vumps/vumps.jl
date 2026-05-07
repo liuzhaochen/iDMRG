@@ -56,9 +56,8 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
         tol=max(1e-12, err))
     mpo.LR = Vector{ITensor}(undef, length(mpo))
     vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
-    psi_left = nothing
-    psi_right = nothing
-    GC.gc(true)
+    # psi_left = nothing
+    # psi_right = nothing
     return psi
 end
 function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObserver(), env_dim=5, global_update=true,
@@ -119,6 +118,8 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
                 @printf "Overlap Error at step %i :%.2E\n" step F
                 if global_update
                     psi, err = vumps_canonical_form(psi, S0, vumps; poi=b)
+                else
+                    err = max(err, F)
                 end
             end
             ini_l = false
@@ -134,7 +135,7 @@ function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, maxdims, cutoff, observer=NoObs
             end
             psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), ini_l, ini_r)
         end
-        GC.gc(true)
+        # GC.gc(true)
         isdone && break
     end
     ipsi.psi = psi

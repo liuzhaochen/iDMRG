@@ -2,11 +2,11 @@
 mutable struct vumps_canonical
     psi_l::MPS
     psi_r::MPS
-    U_L::ITensor
-    U_R::ITensor
+    # U_L::ITensor
+    # U_R::ITensor
     C::Vector{ITensor}
     function vumps_canonical(N)
-        return new(MPS(N), MPS(N), ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, N + 1))
+        return new(MPS(N), MPS(N), Vector{ITensor}(undef, N + 1))
     end
 end
 function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi=1)
@@ -74,7 +74,7 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     replaceind!(vumps.psi_l[N], rind, rnew)
     replaceind!(vumps.C[N+1],dag(rind), dag(rnew))
     replaceind!(UV, rind, rnew)
-    vumps.U_L = UV
+    # vumps.U_L = UV
     S = copy(S0)
     replaceind!(S, dag(rind), dag(rnew))
     error_l = 1 - (error_l*UV*S)[]
@@ -90,7 +90,7 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     replaceind!(vumps.psi_r[1], lind, lnew)
     replaceind!(vumps.C[1],dag(lind), dag(lnew))
     replaceind!(UV, lind, lnew)
-    vumps.U_R = UV
+    # vumps.U_R = UV
     S = copy(S0)
     replaceind!(S, dag(lind), dag(lnew))
     error_r = 1 - (error_r*UV*S)[]
@@ -110,7 +110,7 @@ function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor;
     uv_r = nothing)
     #using psi to update boundary bond tensor
     if isnothing(uv_r)
-        uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
+        # uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
     end
     rind = dag(uniqueind(S0, vumps.C[end]))
     # N = length(psi)
@@ -138,7 +138,7 @@ function vumps_gauge_matrix_right!(psi::MPS, vumps::vumps_canonical, S0::ITensor
     #we might want to get a new rotation matrix U_L and U_R based on
     #current S0
     if isnothing(uv_l)
-        uv_l = uniqueind(vumps.U_R, vumps.psi_r[1])
+        # uv_l = uniqueind(vumps.U_R, vumps.psi_r[1])
     end
     lind = dag(uniqueind(S0, vumps.C[1]))
 
@@ -151,14 +151,16 @@ function vumps_gauge_matrix_right!(psi::MPS, vumps::vumps_canonical, S0::ITensor
     S = pseudo_id(S)
     UV = U * S * V
     replaceind!(UV, lind, uv_l)
-    vumps.U_R = UV
+    # vumps.U_R = UV
     err_r = dag(vumps.C[1]) * UV * delta(dag(uv_l), lind) * S0
     err_r = sqrt(2 * abs(1 - err_r[]))
     return err_r
 end
 function vumps_canonical_form(vumps::vumps_canonical)
-    psi_left = copy(vumps.psi_l)
-    psi_right = copy(vumps.psi_r)
+    # psi_left = copy(vumps.psi_l)
+    # psi_right = copy(vumps.psi_r)
+    psi_left = vumps.psi_l
+    psi_right = vumps.psi_r
     # psi_left[end] = psi_left[end] * vumps.U_L
     # psi_right[1] = psi_right[1] * vumps.U_R
 

@@ -12,7 +12,7 @@ function dmrg3SRSVD(
     # PH = ProjMPO(0, length(H) + 1, 1, H, Vector{ITensor}(undef, length(H)))
     exp = get(kwargs, :expansion, true)
     if exp
-        nsweeps*=2
+        nsweeps *= 2
     end
     sweeps = Sweeps(nsweeps)
     setmaxdim!(sweeps, maxdim...)
@@ -80,7 +80,7 @@ function dmrg3SRSVD(
             end
             #from left to right
             left_to_right = true
-            if sw>nsweep(sweeps)/2 && expansion
+            if sw > nsweep(sweeps) / 2 && expansion
                 expansion = false
             end
             for (b, ha) in sweepnext(N, ncenter=1) #single site 
@@ -92,8 +92,17 @@ function dmrg3SRSVD(
                 if b == 1 && !left_to_right
                     @goto Boundary
                 end
+                L = lproj(PH)
+                R = rproj(PH)
+                #allocate relevant tensor
+
+                Lv = L * phi
+                LHv = Lv * PH.H[b]
+                H0 = PH.H[b]
+                #using in-place contract! in mpo_product
                 vals, vecs = eigsolve(
-                    PH,
+                    x -> mpo_product(L, R, Lv, LHv, H0, x),
+                    # PH,
                     phi,
                     1,
                     eigsolve_which_eigenvalue;
@@ -102,8 +111,8 @@ function dmrg3SRSVD(
                     krylovdim=eigsolve_krylovdim,
                     maxiter=eigsolve_maxiter,
                     verbosity=eigsolve_verbosity,
+                    eager=eigsolve_maxiter > 5,
                 )
-
                 energy = vals[1]
                 phi = vecs[1]
 
