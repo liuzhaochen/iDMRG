@@ -137,16 +137,16 @@ function vumps_site_solve(PH, phi;
     eigsolve_verbosity=0,
     eigsolve_which_eigenvalue=:SR,
     ishermitian=true)
-    L = lproj(PH)
-    R = rproj(PH)
-    #allocate relevant tensor
-    Lv = L * phi
-    LHv = Lv * PH.H[PH.lpos+1]
-    H0 = PH.H[PH.lpos+1]
+    # L = lproj(PH)
+    # R = rproj(PH)
+    # #allocate relevant tensor
+    # Lv = L * phi
+    # LHv = Lv * PH.H[PH.lpos+1]
+    # H0 = PH.H[PH.lpos+1]
     #using in-place contract! in mpo_product
     vals, vecs, info = eigsolve(
-        x -> mpo_product(L, R, Lv, LHv, H0, x),
-        # PH,
+        # x -> mpo_product(L, R, Lv, LHv, H0, x),
+        PH,
         phi,
         1,
         eigsolve_which_eigenvalue;

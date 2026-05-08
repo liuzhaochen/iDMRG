@@ -22,11 +22,11 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
         lambda = denseblocks(copy(lambda))
     end
     #cache
-    Lv = P.L0 * lambda
+    # Lv = P.L0 * lambda
     function central_product(v, Lv, P)
-        # Pv = (P.L0 * v) * P.R0
-        Lv0 = contract!(Lv, P.L0, v, 1.0, 0.0)
-        Pv = Lv0 * P.R0
+        Pv = (P.L0 * v) * P.R0
+        # Lv0 = contract!(Lv, P.L0, v, 1.0, 0.0)
+        # Pv = Lv0 * P.R0
         return noprime!(Pv)
     end
 

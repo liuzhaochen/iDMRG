@@ -2,13 +2,9 @@
 function mpo_product(L, R, Lv, LHv, H, v)
     #using in-place version
     # v1 = noprime!((L*v)*R)
-    if !isempty(commoninds(L, v))
-        Lv = contract!(Lv, L, v, 1.0, 0.0)
-    else
-        Lv = L*v
-    end
+    Lv = !isempty(commoninds(L, v)) ? contract!(Lv, L, v, 1.0, 0.0) : L*v
     LHv = contract!(LHv, Lv, H, 1.0, 0.0)
-    v1 = noprime!(LHv*R)
+    v1 = noprime(LHv*R)
     return v1
 end
 function mpo_product(L, R, v)

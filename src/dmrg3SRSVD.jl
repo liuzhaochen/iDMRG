@@ -92,17 +92,17 @@ function dmrg3SRSVD(
                 if b == 1 && !left_to_right
                     @goto Boundary
                 end
-                L = lproj(PH)
-                R = rproj(PH)
+                # 5-7 with expansion this gives wrong results?
+                #     L = lproj(PH)
+                # R = rproj(PH)
                 #allocate relevant tensor
-
-                Lv = L * phi
-                LHv = Lv * PH.H[b]
-                H0 = PH.H[b]
+                # Lv = L * phi
+                # LHv = Lv * PH.H[b]
+                # H0 = PH.H[b]
                 #using in-place contract! in mpo_product
                 vals, vecs = eigsolve(
-                    x -> mpo_product(L, R, Lv, LHv, H0, x),
-                    # PH,
+                    # x -> mpo_product(L, R, Lv, LHv, H0, x),
+                    PH,
                     phi,
                     1,
                     eigsolve_which_eigenvalue;
@@ -111,7 +111,7 @@ function dmrg3SRSVD(
                     krylovdim=eigsolve_krylovdim,
                     maxiter=eigsolve_maxiter,
                     verbosity=eigsolve_verbosity,
-                    eager=eigsolve_maxiter > 5,
+                    eager=eigsolve_krylovdim > 5,
                 )
                 energy = vals[1]
                 phi = vecs[1]
