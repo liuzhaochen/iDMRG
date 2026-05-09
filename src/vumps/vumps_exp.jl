@@ -144,9 +144,16 @@ function vumps_site_solve(PH, phi;
     # LHv = Lv * PH.H[PH.lpos+1]
     # H0 = PH.H[PH.lpos+1]
     #using in-place contract! in mpo_product
+    L = lproj(PH)
+    R = rproj(PH)
+    ## allocate relevant tensor
+    Lv = L * phi
+    LHv = Lv * PH.H[PH.lpos+1]
+    cache = lanczo_cache(Lv, LHv)
+    H0 = PH.H[PH.lpos+1]
     vals, vecs, info = eigsolve(
-        # x -> mpo_product(L, R, Lv, LHv, H0, x),
-        PH,
+        x -> mpo_product(L, R, H0, cache, x),
+        # PH,
         phi,
         1,
         eigsolve_which_eigenvalue;
@@ -240,23 +247,23 @@ function vumps_dmrg(
             eng_2, C_2 = vumps_bond_left_solve(b, PH, vumps.psi_l, vumps.C[b+1]; eigsolve_tol)
             vumps.C[b+1] = C_2
 
-            # A = phi * dag(C_2)
-            contract!(vumps.psi_l[b], phi, dag(C_2))
+            A = phi * dag(C_2)
+            # contract!(vumps.psi_l[b], phi, dag(C_2))
             linds = uniqueinds(phi, dag(C_2))
-            U, S, V = svd(vumps.psi_l[b], linds)
+            U, S, V = svd(A, linds)
             S = pseudo_id(S)
-            # A = U * S * V
-            # vumps.psi_l[b] = A
-            contract!(vumps.psi_l[b], U, S * V)
+            A = U * S * V
+            vumps.psi_l[b] = A
+            # contract!(vumps.psi_l[b], U, S * V)
 
-            # A = phi * dag(C_1)
-            contract!(vumps.psi_r[b], phi, dag(C_1))
+            A = phi * dag(C_1)
+            # contract!(vumps.psi_r[b], phi, dag(C_1))
             linds = uniqueinds(phi, dag(C_1))
-            U, S, V = svd(vumps.psi_r[b], linds)
+            U, S, V = svd(A, linds)
             S = pseudo_id(S)
-            # A = U * S * V
-            # vumps.psi_r[b] = A
-            contract!(vumps.psi_r[b], U, S * V)
+            A = U * S * V
+            vumps.psi_r[b] = A
+            # contract!(vumps.psi_r[b], U, S * V)
             err_bond = abs((energy - energy0) / max(0.1, abs(energy0)))
             energy0 = energy
             if err_bond < eigsolve_tol / 10

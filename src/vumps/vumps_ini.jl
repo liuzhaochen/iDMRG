@@ -96,9 +96,13 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     error_r = 1 - (error_r*UV*S)[]
 
     #get new mixed canonical tensor
-    psi = copy(vumps.psi_r)
+    #fix shallow copy
+    # psi = copy(vumps.psi_r)
     for i in 1:poi-1
         psi[i] = copy(vumps.psi_l[i])
+    end
+    for i in poi:N
+        psi[i] = copy(vumps.psi_r[i])
     end
     psi[poi] = psi[poi] * vumps.C[poi]
 
@@ -127,7 +131,7 @@ function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor;
     UV = U * S * V
     replaceind!(UV, rind, uv_r)
     # @show inds(UV)
-    vumps.U_L = UV
+    # vumps.U_L = UV
     #calculate canonical error here
     err_r = dag(vumps.C[end]) * UV * delta(dag(uv_r), rind) * S0
     err_r = sqrt(2 * abs(1 - err_r[]))

@@ -1,10 +1,21 @@
-
-function mpo_product(L, R, Lv, LHv, H, v)
+mutable struct lanczo_cache
+    Lv::ITensor
+    LHv::ITensor
+end
+function mpo_product(L, R, H, cache::lanczo_cache, v)
     #using in-place version
     # v1 = noprime!((L*v)*R)
-    Lv = !isempty(commoninds(L, v)) ? contract!(Lv, L, v, 1.0, 0.0) : L*v
-    LHv = contract!(LHv, Lv, H, 1.0, 0.0)
-    v1 = noprime(LHv*R)
+    try 
+        cache.Lv = contract!(cache.Lv, L, v)
+    catch
+        cache.Lv = L*v
+    end
+    try 
+        cache.LHv = contract!(cache.LHv, cache.Lv, H)
+    catch
+        cache.LHv = cache.Lv*H
+    end
+    v1 = noprime(cache.LHv*R)
     return v1
 end
 function mpo_product(L, R, v)

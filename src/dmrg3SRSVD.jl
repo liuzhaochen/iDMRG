@@ -93,16 +93,17 @@ function dmrg3SRSVD(
                     @goto Boundary
                 end
                 # 5-7 with expansion this gives wrong results?
-                #     L = lproj(PH)
-                # R = rproj(PH)
-                #allocate relevant tensor
-                # Lv = L * phi
-                # LHv = Lv * PH.H[b]
-                # H0 = PH.H[b]
-                #using in-place contract! in mpo_product
+                L = lproj(PH)
+                R = rproj(PH)
+                ## allocate relevant tensor
+                Lv = L * phi
+                LHv = Lv * PH.H[b]
+                cache = lanczo_cache(Lv, LHv)
+                H0 = PH.H[b]
+                ## using in-place contract! in mpo_product
                 vals, vecs = eigsolve(
-                    # x -> mpo_product(L, R, Lv, LHv, H0, x),
-                    PH,
+                    x -> mpo_product(L, R, H0, cache, x),
+                    # PH,
                     phi,
                     1,
                     eigsolve_which_eigenvalue;

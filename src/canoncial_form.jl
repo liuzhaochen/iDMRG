@@ -23,7 +23,7 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     end
     #cache
     # Lv = P.L0 * lambda
-    function central_product(v, Lv, P)
+    function central_product(v, P)
         Pv = (P.L0 * v) * P.R0
         # Lv0 = contract!(Lv, P.L0, v, 1.0, 0.0)
         # Pv = Lv0 * P.R0
@@ -34,7 +34,7 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     replaceind!(P.R0, rind, dag(lind))
     #make sure P.R0 and P.L0 share the same link index
     vals, vecs, info = eigsolve(
-        x -> central_product(x, Lv, P),
+        x -> central_product(x, P),
         lambda,
         1,
         :SR;
