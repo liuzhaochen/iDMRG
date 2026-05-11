@@ -69,10 +69,10 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     S = pseudo_id(S)
     UV = U * S * V
     #update far right bond 
-    vumps.psi_l[N] = vumps.psi_l[N]*UV
+    vumps.psi_l[N] = vumps.psi_l[N] * UV
     vumps.C[N+1] = copy(S0)
     replaceind!(vumps.psi_l[N], rind, rnew)
-    replaceind!(vumps.C[N+1],dag(rind), dag(rnew))
+    replaceind!(vumps.C[N+1], dag(rind), dag(rnew))
     replaceind!(UV, rind, rnew)
     # vumps.U_L = UV
     S = copy(S0)
@@ -85,10 +85,10 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     S = pseudo_id(S)
     UV = U * S * V
     #update fart right bond 
-    vumps.psi_r[1] = vumps.psi_r[1]*UV
+    vumps.psi_r[1] = vumps.psi_r[1] * UV
     vumps.C[1] = copy(S0)
     replaceind!(vumps.psi_r[1], lind, lnew)
-    replaceind!(vumps.C[1],dag(lind), dag(lnew))
+    replaceind!(vumps.C[1], dag(lind), dag(lnew))
     replaceind!(UV, lind, lnew)
     # vumps.U_R = UV
     S = copy(S0)
@@ -111,7 +111,7 @@ function vumps_canonical_form(psi::MPS, S0::ITensor, vumps::vumps_canonical; poi
     return psi, sqrt(2 * max(abs(error_l), abs(error_r)))
 end
 function vumps_gauge_matrix_left!(psi::MPS, vumps::vumps_canonical, S0::ITensor;
-    uv_r = nothing)
+    uv_r=nothing)
     #using psi to update boundary bond tensor
     if isnothing(uv_r)
         # uv_r = uniqueind(vumps.U_L, vumps.psi_l[end])
@@ -173,10 +173,29 @@ end
 function vumps_S_matrix_overlap(S0::ITensor, vumps::vumps_canonical)
     lind = uniqueind(vumps.C[1], S0)
     rind = uniqueind(S0, vumps.C[1])
-    overlap_1 = (dag(S0)*delta(rind, dag(lind)) * vumps.C[1])[]
-    
+    overlap_1 = (dag(S0)*delta(rind, dag(lind))*vumps.C[1])[]
+
     lind = uniqueind(vumps.C[end], S0)
     rind = uniqueind(S0, vumps.C[end])
-    overlap_2 = (dag(S0)*delta(rind, dag(lind)) * vumps.C[end])[]
-    return 1-min(abs(overlap_1), abs(overlap_2))
+    overlap_2 = (dag(S0)*delta(rind, dag(lind))*vumps.C[end])[]
+    return 1 - min(abs(overlap_1), abs(overlap_2))
+end
+function vumps_update!(l_to_r, S0::ITensor, psi::MPS, vumps::vumps_canonical)
+    N = length(psi)
+    lind = uniqueind(vumps.C[1], S0)
+    rind = uniqueind(S0, vumps.C[1])
+    vumps.C[1] = copy(S0)
+    replaceind!(vumps.C[1], rind, lind)
+
+    lind = uniqueind(vumps.C[N+1], S0)
+    rind = uniqueind(S0, vumps.C[N+1])
+    vumps.C[N+1] = copy(S0)
+    replaceind!(vumps.C[N+1], rind, lind)
+
+    if l_to_r
+        psi[1] = vumps.C[1] * vumps.psi_r[1]
+    else
+        psi[N] = vumps.C[N+1] * vumps.psi_l[N]
+    end
+    return psi
 end
