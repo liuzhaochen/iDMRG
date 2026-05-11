@@ -1,6 +1,4 @@
 #a poor man's vumps
-include("vumps_ini.jl")
-include("vumps_dmrg.jl")
 function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
     Nsite = length(mpo)
     site_inds = isiteinds(psi_left)
@@ -97,7 +95,7 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
         error("only support singe site version")
     end
     solver = vumps_dmrg
-    allowed_keys = (:bond_maxiter)
+    allowed_keys = (:bond_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     eng = 0
     eng_c = 0
@@ -167,7 +165,7 @@ function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(),
         error("only support singe site version")
     end
     solver = vumps_dmrg_parallel
-    allowed_keys = (:bond_maxiter)
+    allowed_keys = (:bond_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     eng = 0
     eng_c = 0
