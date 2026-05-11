@@ -6,13 +6,6 @@ mutable struct lanczo_cache
     end
 end
 function mpo_product(L, R, H, cache::lanczo_cache, v)
-    #using in-place version
-    # v1 = noprime!((L*v)*R)
-    # try 
-    #     cache.Lv = contract!(cache.Lv, L, v)
-    # catch
-    #     cache.Lv = L*v
-    # end
     if cache.Lv == ITensor(1.0)
         cache.Lv = L * H
     end
@@ -97,9 +90,7 @@ function isiteinds(psi)
     for i in 1:N
         ids = inds(psi[i])
         for id in ids
-            # @show tags(id)
-            phy = string(collect(tags(id))[2])
-            if phy == "Site"
+            if hastags(id, "Site")
                 push!(idx, noprime(id))
             end
         end
@@ -129,7 +120,7 @@ function jacobi_davidson(f, x0;
     cg_krylovdim=5,
     eigsolve_maxiter=0,
     eigsolve_tol=1e-10,
-    verbosity = 0)
+    verbosity=0)
 
     energy = 0
     err = 0

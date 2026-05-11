@@ -1,24 +1,3 @@
-using Base: info_color
-#solve and expand the bond_dim
-function vumps_dmrg(
-    H,
-    psi0::MPS;
-    nsweeps,
-    maxdim=ITensorMPS.default_maxdim(),
-    mindim=ITensorMPS.default_mindim(),
-    cutoff=ITensorMPS.default_cutoff(Float64),
-    noise=ITensorMPS.default_noise(),
-    kwargs...,
-)
-    # H = permute(H, (linkind, siteinds, linkind))
-    # PH = ProjMPO(0, length(H) + 1, 1, H, Vector{ITensor}(undef, length(H)))
-    sweeps = Sweeps(nsweeps)
-    setmaxdim!(sweeps, maxdim...)
-    setmindim!(sweeps, mindim...)
-    setcutoff!(sweeps, cutoff...)
-    setnoise!(sweeps, noise...)
-    return vumps_dmrg(H, psi0, sweeps; kwargs...)
-end
 function vumps_makeL!(P, psi, k)
     ll = P.lpos
     if ll ≥ k
@@ -137,12 +116,6 @@ function vumps_site_solve(PH, phi;
     eigsolve_verbosity=0,
     eigsolve_which_eigenvalue=:SR,
     ishermitian=true)
-    # L = lproj(PH)
-    # R = rproj(PH)
-    # #allocate relevant tensor
-    # Lv = L * phi
-    # LHv = Lv * PH.H[PH.lpos+1]
-    # H0 = PH.H[PH.lpos+1]
     #using in-place contract! in mpo_product
     L = lproj(PH)
     R = rproj(PH)
@@ -177,8 +150,7 @@ function vumps_site_solve(PH, phi;
 end
 function vumps_dmrg(
     PH,
-    psi0::MPS,
-    sweeps::Sweeps;
+    psi0::MPS;
     step=1,
     poi=1,
     vumps=nothing,
@@ -198,13 +170,7 @@ function vumps_dmrg(
     eigsolve_verbosity=0,
     eigsolve_which_eigenvalue=:SR,
     ishermitian=true,
-    # rsvd
-    rsvd_qn_min_dim=2,
-    rsvd_power_iteration=0,
-    expansion=true,
-    alpha=2e-2,
-    alpha_min=1e-8,
-    adjust_alpha=true,
+    kwargs...
 )
     psi = copy(psi0)
     N = length(psi)
@@ -215,25 +181,11 @@ function vumps_dmrg(
     residual = 0.0
     spec = nothing
     sw = 1
-    # central_bond_tensor = nothing
     ha = left_to_right ? 1 : 2
     dx = left_to_right ? 1 : -1
-    # sites = isiteinds(psi)
     maxtruncerr = 0.0
     err_bond = 0.0
-    is_boundary = false
-
-    if (left_to_right && poi == N) || (!left_to_right && poi == 1)
-        is_boundary = true
-    end
     sw_time = @elapsed begin
-        # if !isnothing(write_when_maxdim_exceeds)
-        #     if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
-        #        (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
-        #         PH = disk(PH; path=write_path)
-        #     end
-        # end
-        # for b in order
         b = poi
         #as every time, the env is recalculated, no need to store every LR here
         PH = vumps_position!(PH, psi, b)
@@ -241,9 +193,6 @@ function vumps_dmrg(
         poi_l = b + dx
 
         energy0 = energy_A
-        if is_boundary && bond_maxiter != 1
-            # @goto Next
-        end
         for i in 1:bond_maxiter
             #two steps for bond matrix
             #such that L*C_2 = A = C_1 * R
@@ -280,8 +229,6 @@ function vumps_dmrg(
             err_r = 1 - (dag(phi)*vumps.psi_r[b]*vumps.C[b])[]
             err = sqrt(2max(abs(err_l), abs(err_r)))
         end
-        # @show err
-        @label Next
         if left_to_right && b != N
             psi[b] = copy(vumps.psi_l[b])
             psi[poi_l] = vumps.C[b+1] * psi[poi_l]
@@ -290,17 +237,6 @@ function vumps_dmrg(
             psi[poi_l] = vumps.C[b] * psi[poi_l]
         else
             psi[b] = phi
-            # if left_to_right
-            #     psi[b] = vumps.psi_l[b] * vumps.C[b+1]
-            # else
-            #     psi[b] = vumps.psi_r[b] * vumps.C[b]
-            # end
-        end
-        if b == N && left_to_right
-            # S0, err = vumps_S0_problem_left(psi, vumps, S0, PH; eigsolve_tol)
-        end
-        if b == 1 && !left_to_right
-            # S0, err = vumps_S0_problem_right(psi, vumps, S0, PH; eigsolve_tol)
         end
         sweep_is_done = (b == 1 && ha == 2)
         ITensorMPS.measure!(
@@ -371,8 +307,7 @@ function vumps_dmrg_parallel(
     err_bond = 0.0
     sw_time = @elapsed begin
         if !isnothing(write_when_maxdim_exceeds)
-            if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
-               (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
+            if (maxlinkdim(psi) > write_when_maxdim_exceeds)
                 PH = disk(PH; path=write_path)
             end
         end
