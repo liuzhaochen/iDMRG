@@ -96,9 +96,7 @@ function dmrg3SRSVD(
                 L = lproj(PH)
                 R = rproj(PH)
                 ## allocate relevant tensor
-                Lv = L * phi
-                LHv = Lv * PH.H[b]
-                cache = lanczo_cache(Lv, LHv)
+                cache = lanczo_cache()
                 H0 = PH.H[b]
                 ## using in-place contract! in mpo_product
                 vals, vecs = eigsolve(
