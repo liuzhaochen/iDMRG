@@ -5,6 +5,19 @@ mutable struct lanczo_cache
         return new(ITensor(1.0), ITensor(1.0))
     end
 end
+function mpo_product(L, R, H, cache::lanczo_cache, c::ITensor, v)
+    if cache.Lv == ITensor(1.0)
+        cache.Lv = L * H * dag(c) * prime(c)
+    end
+    try
+        # cache.LHv = contract!(cache.LHv, cache.Lv, H)
+        cache.LHv = contract!(cache.LHv, cache.Lv, v)
+    catch
+        cache.LHv = cache.Lv * v
+    end
+    v1 = noprime(cache.LHv * R)
+    return v1
+end
 function mpo_product(L, R, H, cache::lanczo_cache, v)
     if cache.Lv == ITensor(1.0)
         cache.Lv = L * H

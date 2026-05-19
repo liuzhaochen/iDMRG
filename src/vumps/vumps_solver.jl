@@ -122,8 +122,14 @@ function vumps_site_solve(PH, phi;
     ## allocate relevant tensor
     cache = lanczo_cache()
     H0 = PH.H[PH.lpos+1]
+    #combine vitrual and phyics indics
+    lind = commonind(phi, L)
+    sind = commonind(phi, H0)
+    c = combiner(lind, sind)
+    phi = c * phi
     vals, vecs, info = eigsolve(
-        x -> mpo_product(L, R, H0, cache, x),
+        x -> mpo_product(L, R, H0, cache, c, x),
+        # x -> mpo_product(L, R, H0, cache, x),
         # PH,
         phi,
         1,
@@ -137,7 +143,8 @@ function vumps_site_solve(PH, phi;
     )
     residual = max(residual, info.normres[1])
     energy = vals[1]
-    phi = vecs[1]
+    phi = vecs[1] * dag(c)
+    # phi = vecs[1]
     # energy, phi, residual0 = jacobi_davidson(
     #     x -> mpo_product(L, R, H0, cache, x),
     #     phi;
