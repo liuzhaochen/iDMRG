@@ -78,7 +78,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     #using sweeps system for global steps
     isdone = false
     solver = mpo.nsite == 1 ? dmrg3SRSVD : dmrg
-    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter, :alpha) : (:eigsolve_maxiter,)
+    allowed_keys = mpo.nsite == 1 ? (:expansion, :eigsolve_maxiter, :alpha, :expansion_sweeps) : (:eigsolve_maxiter,)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     for s in 1:nstep_max
         #nsteps = global step
