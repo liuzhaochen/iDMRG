@@ -11,9 +11,6 @@ function dmrg3SRSVD(
     # H = permute(H, (linkind, siteinds, linkind))
     # PH = ProjMPO(0, length(H) + 1, 1, H, Vector{ITensor}(undef, length(H)))
     exp = get(kwargs, :expansion, true)
-    if exp
-        nsweeps *= 2
-    end
     sweeps = Sweeps(nsweeps)
     setmaxdim!(sweeps, maxdim...)
     setmindim!(sweeps, mindim...)
@@ -45,6 +42,7 @@ function dmrg3SRSVD(
     alpha=2e-2,
     alpha_min=1e-8,
     adjust_alpha=true,
+    expansion_sweeps = 2,
 )
     psi = copy(psi0)
     N = length(psi)
@@ -80,7 +78,7 @@ function dmrg3SRSVD(
             end
             #from left to right
             left_to_right = true
-            if sw > nsweep(sweeps) / 2 && expansion
+            if sw > expansion_sweeps && expansion
                 expansion = false
             end
             for (b, ha) in sweepnext(N, ncenter=1) #single site 
