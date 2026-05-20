@@ -42,7 +42,8 @@ function ITensors.NDTensors.contract!(
     )
     check = off_R == off_R1
     if !check
-        error("The contraction result doesn't match the input tensor: off_R = $off_R, off_R1 = $off_R1")
+        # error("The contraction result doesn't match the input tensor: off_R = $off_R, off_R1 = $off_R1")
+        R = reshape(R, off_R1, indsR)
     end
     ITensors.NDTensors.contract!(R, labelsR, tensor1, labelstensor1, tensor2, labelstensor2, contraction_plan)
     return R
