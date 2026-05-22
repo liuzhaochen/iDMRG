@@ -125,11 +125,11 @@ function vumps_site_solve(PH, phi;
     #combine vitrual and phyics indics
     lind = commonind(phi, L)
     sind = commonind(phi, H0)
-    c = combiner(lind, sind)
-    phi = c * phi
+    # c = combiner(lind, sind)
+    # phi = c * phi
     vals, vecs, info = eigsolve(
-        x -> mpo_product(L, R, H0, cache, c, x),
-        # x -> mpo_product(L, R, H0, cache, x),
+        # x -> mpo_product(L, R, H0, cache, c, x),
+        x -> mpo_product(L, R, H0, cache, x),
         # PH,
         phi,
         1,
@@ -143,8 +143,8 @@ function vumps_site_solve(PH, phi;
     )
     residual = max(residual, info.normres[1])
     energy = vals[1]
-    phi = vecs[1] * dag(c)
-    # phi = vecs[1]
+    # phi = vecs[1] * dag(c)
+    phi = vecs[1]
     # energy, phi, residual0 = jacobi_davidson(
     #     x -> mpo_product(L, R, H0, cache, x),
     #     phi;
@@ -209,22 +209,22 @@ function vumps_dmrg(
             vumps.C[b+1] = C_2
 
             A = phi * dag(C_2)
-            # contract!(vumps.psi_l[b], phi, dag(C_2))
+            # vumps.psi_l[b] = contract!(vumps.psi_l[b], phi, dag(C_2))
             linds = uniqueinds(phi, dag(C_2))
             U, S, V = svd(A, linds)
             S = pseudo_id(S)
             A = U * S * V
             vumps.psi_l[b] = A
-            # contract!(vumps.psi_l[b], U, S * V)
+            # vumps.psi_l[b] = contract!(vumps.psi_l[b], U, S * V)
 
             A = phi * dag(C_1)
-            # contract!(vumps.psi_r[b], phi, dag(C_1))
+            # vumps.psi_r[b] = contract!(vumps.psi_r[b], phi, dag(C_1))
             linds = uniqueinds(phi, dag(C_1))
             U, S, V = svd(A, linds)
             S = pseudo_id(S)
             A = U * S * V
             vumps.psi_r[b] = A
-            # contract!(vumps.psi_r[b], U, S * V)
+            # vumps.psi_r[b] = contract!(vumps.psi_r[b], U, S * V)
             err_bond = abs((energy - energy0) / max(0.1, abs(energy0)))
             energy0 = energy
             if err_bond < eigsolve_tol / 10
@@ -333,22 +333,22 @@ function vumps_dmrg_parallel(
                 vumps.C[b+1] = C_2
 
                 A = phi * dag(C_2)
-                # contract!(vumps.psi_l[b], phi, dag(C_2))
+                # vumps.psi_l[b] = contract!(vumps.psi_l[b], phi, dag(C_2))
                 linds = uniqueinds(phi, dag(C_2))
                 U, S, V = svd(A, linds)
                 S = pseudo_id(S)
                 A = U * S * V
                 vumps.psi_l[b] = A
-                # contract!(vumps.psi_l[b], U, S * V)
+                # vumps.psi_l[b] = contract!(vumps.psi_l[b], U, S * V)
 
                 A = phi * dag(C_1)
                 # contract!(vumps.psi_r[b], phi, dag(C_1))
+                # vumps.psi_r[b] = contract!(vumps.psi_r[b], phi, dag(C_1))
                 linds = uniqueinds(phi, dag(C_1))
                 U, S, V = svd(A, linds)
                 S = pseudo_id(S)
                 A = U * S * V
                 vumps.psi_r[b] = A
-                # contract!(vumps.psi_r[b], U, S * V)
                 err_bond0 = abs((energy - energy0) / max(0.1, abs(energy0)))
                 energy0 = energy
                 if err_bond0 < eigsolve_tol

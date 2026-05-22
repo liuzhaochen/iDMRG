@@ -40,7 +40,7 @@ function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_ri
     replaceind!(S0, lind, dag(lind_p))
 end
 function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_canonical, left_to_right;
-    S0=nothing, expansion=true, ini_r=false, ini_l=false, err=0, outputlevel=0,
+    S0=nothing, expansion=true, ini_r=false, ini_l=false, err=0, outputlevel=0, gc_dim,
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
@@ -50,7 +50,7 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
     mpo.lpos = 0
     mpo.rpos = length(mpo) + 1
     psi_left, psi_right = vumps_canonical_form(vumps)
-    mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., ini_l, ini_r, outputlevel,
+    mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., ini_l, ini_r, outputlevel, gc_dim,
         tol=max(1e-12, err))
     mpo.LR = Vector{ITensor}(undef, length(mpo))
     vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
@@ -58,22 +58,22 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
     # psi_right = nothing
     return psi
 end
-function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true,
+function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim=10000,
     eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing, algorithm="vumps",
     tol=(x -> max(1e-12, x / 100)), kwargs...)
     #note, this method does not work for pure product state
     #using iDMRG to prepare initial state
     if algorithm == "vumps"
-        return vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, global_update,
+        return vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, global_update, gc_dim,
             eigsolve_krylovdim=30, eigsolve_maxiter=200, obs, write_when_maxdim_exceeds,
             tol, kwargs...)
     else
-        return vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, global_update,
+        return vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, global_update, gc_dim,
             eigsolve_krylovdim=30, eigsolve_maxiter=200, obs, write_when_maxdim_exceeds,
             tol, kwargs...)
     end
 end
-function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true,
+function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim,
     eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
     tol=(x -> max(1e-12, x / 100)), kwargs...)
     Nt = length(mpo)
@@ -134,7 +134,7 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
                     err = max(err, F)
                 end
             end
-            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100))
+            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), gc_dim)
         end
         # GC.gc(true)
         isdone && break
@@ -143,7 +143,7 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
     ipsi.S0 = S0
     return ipsi
 end
-function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true,
+function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim,
     eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
     tol=(x -> max(1e-12, x / 100)), kwargs...)
     Nt = length(mpo)
@@ -198,7 +198,7 @@ function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(),
         isdone && break
         #reinitialize the enviroment with updated psi_left and psi_right (global update)
         F = vumps_S_matrix_overlap(S0, vumps)
-        psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100))
+        psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), gc_dim)
         # GC.gc(true)
     end
     ipsi.psi = psi

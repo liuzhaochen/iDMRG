@@ -1,7 +1,7 @@
 #using power iteration method to calculate the mpo left/right fixed point
 #to accelerate power iteration
 #using the anderson method
-function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=300, outputlevel=1)
+function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=300, outputlevel=1, gc = false)
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
@@ -48,8 +48,8 @@ function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=300,
             )
             flush(stdout)
         end
-        if mod(j, m) == 0
-            # GC.gc(true)
+        if mod(j, m) == 0 && gc
+            GC.gc(true)
         end
         en_prev = en
 
@@ -136,7 +136,7 @@ function left_TMv(L, Ls::Vector{ITensor} ,lind, rind, mpo_lind, mpo_rind, site_p
         A = psi_left[j]
         #cache the Ls
         L = ((L * A) * mpo.H[j])* dag(prime(A))
-        # L0 = ((L * A) * mpo.H[j])* dag(prime(A))
+        # L0 = ((L * A) * mpo.H[j]) #* dag(prime(A))
         # if !isassigned(Ls, j)
         #     Ls[j] = L0*dag(prime(A))
         # else
@@ -144,7 +144,7 @@ function left_TMv(L, Ls::Vector{ITensor} ,lind, rind, mpo_lind, mpo_rind, site_p
         # end
         # L = Ls[j]
     end
-    # L = Ls[end]
+    # L = copy(Ls[end])
     if replace_inds
         replaceind!(L, rind, dag(lind))
         replaceind!(L, dag(prime(rind)), prime(lind))
@@ -178,9 +178,11 @@ function right_TMv(L, Ls::Vector{ITensor}, lind, rind, mpo_lind, mpo_rind, site_
     return L
 end
 function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12, ini_l=true,
-    ini_r=true, outputlevel=1, replace=false, env_dim = 5)
+    ini_r=true, outputlevel=1, replace=false, env_dim = 5, gc_dim = 10000)
     Nuc = length(mpo)
     #initialize the left and right MPO env
+    max_dim = maxlinkdim(psi_left)
+    gc = max_dim>= gc_dim
     if ini_l
         initializeMPOLeft!(psi_left, H_ini, mpo)
     end
@@ -224,7 +226,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:step
         L, en0 = lproduct(L)
     end
-    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel, m = env_dim)
+    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel, m = env_dim, gc)
     # mpo.L0 = lproduct(L, rep=replace)[1]
     replaceind!(L, dag(lind), rind)
     replaceind!(L, prime(lind), dag(prime(rind)))
@@ -258,7 +260,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:step
         L, en0 = rproduct(L)
     end
-    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel, m = env_dim)
+    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel, m = env_dim, gc)
     # mpo.R0 = rproduct(L, rep=replace)[1]
     replaceind!(L, dag(rind), lind)
     replaceind!(L, prime(rind), dag(prime(lind)))

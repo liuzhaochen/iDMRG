@@ -1,5 +1,5 @@
 
-function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing, err_0=nothing,
+function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing, err_0=nothing, gc_dim = 10000,
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
@@ -17,7 +17,7 @@ function initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO; nsweeps=10, S0=nothing
         @printf "Canoncial Error :%s\n" err
         flush(stdout)
         err_0 = isnothing(err_0) ? 1e-4 * err : err_0
-        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol=max(1e-12, err_0))
+        mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., tol=max(1e-12, err_0), gc_dim)
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -57,7 +57,7 @@ function ITensorMPS.checkdone!(o::local_step_checkdone; kwargs...)
     o.last_energy = energy
     return false
 end
-function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff, observer=NoObserver(),
+function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutoff, observer=NoObserver(), gc_dim = 10000,
     eigsolve_krylovdim=3, tol=(x->min(1e-5, max(1e-12, x/100))), eng_tol=1e-10, obs=nothing, write_when_maxdim_exceeds=nothing, kwargs...)
     Nt = length(mpo)
     swap_poi = iseven(Nt) ? Int(Nt / 2) : Int(Nt / 2 + 1 / 2)
@@ -136,7 +136,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         isdone && break
         #reinitialize environment
         if s != nstep_max
-            psi, err = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0=1e-12, ini_l=false, ini_r=false)
+            psi, err = initializeIMPO!(psi, H_ini, mpo; S0, tol, err_0=1e-12, ini_l=false, ini_r=false, gc_dim)
         end
         # GC.gc(true)
     end
