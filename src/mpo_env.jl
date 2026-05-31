@@ -1,7 +1,7 @@
 #using power iteration method to calculate the mpo left/right fixed point
 #to accelerate power iteration
 #using the anderson method
-function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=300, outputlevel=1, gc = false)
+function anderson_accelerate(L_init, product_func; m=5, tol=1e-12, max_iter=300, outputlevel=1, gc=false)
     Ls = Vector{ITensor}(undef, m)
     Rs = Vector{ITensor}(undef, m)
     G_cache = zeros(m, m)  # inner product of residule <Ri, Rj>
@@ -126,25 +126,34 @@ function local_energy(L, S0, ten_zero, deten)
     return Ld[]
 end
 #one step of TM*v
-function left_TMv(L, Ls::Vector{ITensor} ,lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_left, mpo; replace_inds=true)
+function left_TMv(L, buf, lind, rind, mpo_lind, mpo_rind, psi_left, mpo; replace_inds=true)
     #apply one TMPO to left environment
     Nsite = length(mpo)
-    # site_psi = isiteinds(psi_left)
-    for j in 1:Nsite
-        psi_sind = site_psi[j]
-        mpo_sind = site_mpo[j]
-        A = psi_left[j]
-        #cache the Ls
-        L = ((L * A) * mpo.H[j])* dag(prime(A))
-        # L0 = ((L * A) * mpo.H[j]) #* dag(prime(A))
-        # if !isassigned(Ls, j)
-        #     Ls[j] = L0*dag(prime(A))
-        # else
-        #     contract!(Ls[j], L0, dag(prime(A)))
-        # end
-        # L = Ls[j]
+    Lb = to_buffer(L, buf[1])
+    #move psi to buffer
+    with_alloc_buffer(buf[1]) do
+        for j in 1:Nsite
+            # psi_sind = site_psi[j]
+            # mpo_sind = site_mpo[j]
+            A = psi_left[j]
+            #cache the Ls
+            #intermediate tensor will be on buf2
+            Lb = with_alloc_buffer(buf[2]) do
+                hb = to_buffer(mpo.H[j], buf[2])
+                Ab = to_buffer(A, buf[2])
+                L1 = Lb * Ab
+                #reset buf1 to release L
+                reset!(buf[1])
+                L1 * hb * dag(prime(Ab))
+            end
+            #this move L to buffer of buf[1]
+            Lb = move_to_heap(Lb, buf[2])
+            #release intermediate alloc on buf2
+            reset!(buf[2])
+        end
     end
-    # L = copy(Ls[end])
+    L = move_to_heap(Lb, buf[1])
+    reset!(buf[1])
     if replace_inds
         replaceind!(L, rind, dag(lind))
         replaceind!(L, dag(prime(rind)), prime(lind))
@@ -152,23 +161,31 @@ function left_TMv(L, Ls::Vector{ITensor} ,lind, rind, mpo_lind, mpo_rind, site_p
     replaceind!(L, mpo_rind, dag(mpo_lind))
     return L
 end
-function right_TMv(L, Ls::Vector{ITensor}, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_left, mpo; replace_inds=true)
+function right_TMv(L, buf, lind, rind, mpo_lind, mpo_rind, psi_left, mpo; replace_inds=true)
     #apply one TMPO to left environment
     Nsite = length(mpo)
+    Lb = to_buffer(L, buf[1])
     # site_psi = isiteinds(psi_left)
-    for j in Nsite:-1:1
-        psi_sind = site_psi[j]
-        mpo_sind = site_mpo[j]
-        A = psi_left[j]
-        L = ((L * A) * mpo.H[j]) * dag(prime(A))
-        # L0 = ((L * A) * mpo.H[j])# * dag(prime(A))
-        # if !isassigned(Ls, j)
-        #     Ls[j] = L0*dag(prime(A))
-        # else
-        #     contract!(Ls[j], L0, dag(prime(A)))
-        # end
-        # L = Ls[j]
+    with_alloc_buffer(buf[1]) do
+        for j in Nsite:-1:1
+            # psi_sind = site_psi[j]
+            # mpo_sind = site_mpo[j]
+            A = psi_left[j]
+            Lb = with_alloc_buffer(buf[2]) do
+                hb = to_buffer(mpo.H[j], buf[2])
+                Ab = to_buffer(A, buf[2])
+                L1 = Lb * Ab
+                reset!(buf[1])
+                L1 * hb * dag(prime(Ab))
+            end
+            #move ram to buf1
+            Lb = move_to_heap(Lb, buf[2])
+            reset!(buf[2])
+            # L = ((L * A) * mpo.H[j]) * dag(prime(A))
+        end
     end
+    L = move_to_heap(Lb, buf[1])
+    reset!(buf[1])
     # L = copy(Ls[1])
     if replace_inds
         replaceind!(L, lind, dag(rind))
@@ -177,12 +194,12 @@ function right_TMv(L, Ls::Vector{ITensor}, lind, rind, mpo_lind, mpo_rind, site_
     replaceind!(L, mpo_lind, dag(mpo_rind))
     return L
 end
-function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO; tol=1e-12, ini_l=true,
-    ini_r=true, outputlevel=1, replace=false, env_dim = 5, gc_dim = 10000)
+function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::iMPO, buf; tol=1e-12, ini_l=true,
+    ini_r=true, outputlevel=1, replace=false, env_dim=5, gc_dim=10000)
     Nuc = length(mpo)
     #initialize the left and right MPO env
     max_dim = maxlinkdim(psi_left)
-    gc = max_dim>= gc_dim
+    gc = max_dim >= gc_dim
     if ini_l
         initializeMPOLeft!(psi_left, H_ini, mpo)
     end
@@ -194,7 +211,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     pmpo_sind = prime.(site_mpo)
     mpo_lind = setdiff(uniqueinds(mpo.H[1], mpo.H[2]), [dag(site_mpo[1]), pmpo_sind[1]])[1]
     mpo_rind = setdiff(uniqueinds(mpo.H[end], mpo.H[end-1]), [dag(site_mpo[end]), pmpo_sind[end]])[1]
-
+    bsizes = [buffer_size(buf[i]) for i in 1:2]
     #################################################
     #
     #             Left Enviroment
@@ -210,12 +227,11 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     link_id = commonind(mpo.L0, mpo.H[1])
     ten_zero = ITensor(dag(link_id)) #on-site tensor to extract energy density
     ten_zero[link_id=>1] = 1
-    Ls = Vector{ITensor}(undef, Nuc)
     function lproduct(L; rep=true)
         en_density = local_energy(L, S0, ten_zero, deten) / Nuc
         #substract energy from current hamiltonian
         energyMPOSubtraction!(mpo, en_density)
-        L = left_TMv(L, Ls, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_left, mpo, replace_inds=rep)
+        L = left_TMv(L, buf, lind, rind, mpo_lind, mpo_rind, psi_left, mpo, replace_inds=rep)
         energyMPOSubtraction!(mpo, -en_density)
         return L, en_density
     end
@@ -226,7 +242,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:step
         L, en0 = lproduct(L)
     end
-    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel, m = env_dim, gc)
+    L, _ = anderson_accelerate(L, lproduct; tol, outputlevel, m=env_dim, gc)
     # mpo.L0 = lproduct(L, rep=replace)[1]
     replaceind!(L, dag(lind), rind)
     replaceind!(L, prime(lind), dag(prime(rind)))
@@ -245,12 +261,11 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     link_id = commonind(mpo.R0, mpo.H[end])
     ten_zero = ITensor(dag(link_id))
     ten_zero[link_id=>end] = 1
-    Ls = Vector{ITensor}(undef, Nuc)
     function rproduct(L; rep=true)
         en_density = local_energy(L, S0, ten_zero, deten) / Nuc
         #substract energy from current hamiltonian
         energyMPOSubtraction!(mpo, en_density)
-        L = right_TMv(L, Ls, lind, rind, mpo_lind, mpo_rind, site_psi, site_mpo, psi_right, mpo, replace_inds=rep)
+        L = right_TMv(L, buf, lind, rind, mpo_lind, mpo_rind, psi_right, mpo, replace_inds=rep)
         energyMPOSubtraction!(mpo, -en_density)
         return L, en_density
     end
@@ -260,10 +275,13 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     for i in 1:step
         L, en0 = rproduct(L)
     end
-    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel, m = env_dim, gc)
+    L, _ = anderson_accelerate(L, rproduct; tol, outputlevel, m=env_dim, gc)
     # mpo.R0 = rproduct(L, rep=replace)[1]
     replaceind!(L, dag(rind), lind)
     replaceind!(L, prime(rind), dag(prime(lind)))
     mpo.R0 = L
+    for i in 1:2
+        resize_buffer!(bsizes[i], buf[i])
+    end
     return nothing
 end

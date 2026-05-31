@@ -42,7 +42,7 @@ function dmrg3SRSVD(
     alpha=2e-2,
     alpha_min=1e-8,
     adjust_alpha=true,
-    expansion_sweeps = 2,
+    expansion_sweeps=2,
 )
     psi = copy(psi0)
     N = length(psi)
@@ -52,8 +52,7 @@ function dmrg3SRSVD(
     @assert isortho(psi) && orthocenter(psi) == 1
 
     if !isnothing(write_when_maxdim_exceeds)
-        if (maxlinkdim(psi) > write_when_maxdim_exceeds) ||
-           (maxdim(sweeps, 1) > write_when_maxdim_exceeds)
+        if (maxlinkdim(psi) > write_when_maxdim_exceeds)
             PH = disk(PH; path=write_path)
         end
     end
@@ -65,6 +64,7 @@ function dmrg3SRSVD(
     Nexp = 0
     alg = "global_krylov"
     for sw in 1:nsweep(sweeps)
+        residual = 0.0
         sw_time = @elapsed begin
             maxtruncerr = 0.0
             if !isnothing(write_when_maxdim_exceeds) &&
@@ -97,7 +97,7 @@ function dmrg3SRSVD(
                 cache = lanczo_cache()
                 H0 = PH.H[b]
                 ## using in-place contract! in mpo_product
-                vals, vecs = eigsolve(
+                vals, vecs, info = eigsolve(
                     x -> mpo_product(L, R, H0, cache, x),
                     # PH,
                     phi,
@@ -110,6 +110,8 @@ function dmrg3SRSVD(
                     verbosity=eigsolve_verbosity,
                     eager=eigsolve_krylovdim > 5,
                 )
+                cache = nothing
+                residual = max(residual, info.normres[1])
                 energy = vals[1]
                 phi = vecs[1]
 
@@ -214,19 +216,6 @@ function dmrg3SRSVD(
                 psi[b] = U
                 psi[poi] = V * B
                 @label next
-                if outputlevel >= 2
-                    @printf("Sweep %d, half %d, bond (%d,%d) energy=%s\n", sw, ha, b, b + 1, energy)
-                    @printf(
-                        "  Truncated using cutoff=%.1E maxdim=%d mindim=%d\n",
-                        cutoff(sweeps, sw),
-                        maxdim(sweeps, sw),
-                        mindim(sweeps, sw)
-                    )
-                    @printf(
-                        "  Trunc. err=%.2E, bond dimension %d\n", spec.truncerr, dim(linkind(psi, b))
-                    )
-                    flush(stdout)
-                end
                 @label Boundary
                 if b == N && left_to_right
                     left_to_right = false
@@ -250,15 +239,27 @@ function dmrg3SRSVD(
             end
         end
         if outputlevel >= 1
-            @printf(
-                "After sweep %d energy=%s  maxlinkdim=%d maxerr=%.2E mixer=%.2E time=%.3f\n",
-                sw,
-                energy,
-                maxlinkdim(psi),
-                maxtruncerr,
-                alpha,
-                sw_time
-            )
+            if expansion
+                @printf(
+                    "After sweep %d energy=%s  maxlinkdim=%d residual =%.2E maxerr=%.2E mixer=%.2E time=%.3f\n",
+                    sw,
+                    energy,
+                    maxlinkdim(psi),
+                    residual,
+                    maxtruncerr,
+                    alpha,
+                    sw_time
+                )
+            else
+                @printf(
+                    "After sweep %d energy=%s  maxlinkdim=%d residual=%.2E time=%.3f\n",
+                    sw,
+                    energy,
+                    maxlinkdim(psi),
+                    residual,
+                    sw_time
+                )
+            end
             flush(stdout)
         end
         isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)

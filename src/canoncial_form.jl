@@ -5,7 +5,8 @@ function mpo_env_linkinds(psi::MPS, P::iMPO)
     rind = commonind(P.R0, P.H[N])
     return lind, rind
 end
-function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
+function central_site_problem(psi::MPS, P::iMPO, tol, buf; lambda=nothing)
+    tol = 1e-10
     #calculate the Lambda
     #first, construct the effective H
     #psi is used to find the correct indices
@@ -16,11 +17,6 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
     if isnothing(lind)
         return 1, ITensor(1.0)
     end
-    if isnothing(lambda)
-        lambda = random_itensor(lind, rind)
-    else
-        lambda = denseblocks(copy(lambda))
-    end
     #cache
     # Lv = P.L0 * lambda
     function central_product(v, P)
@@ -29,25 +25,47 @@ function central_site_problem(psi::MPS, P::iMPO; lambda=nothing)
         # Pv = Lv0 * P.R0
         return noprime!(Pv)
     end
+    if isnothing(lambda)
+        lambda = random_itensor(lind, rind)
+    else
+        lambda = denseblocks(copy(lambda))
+    end
 
     lind, rind = mpo_env_linkinds(psi, P)
     replaceind!(P.R0, rind, dag(lind))
     #make sure P.R0 and P.L0 share the same link index
-    vals, vecs, info = eigsolve(
-        x -> central_product(x, P),
-        lambda,
-        1,
-        :SR;
-        ishermitian=true,
-        tol=1e-14,
-        krylovdim=30,
-        maxiter=200,
-        verbosity=0,
-        eager=true,
-    )
+    eng = 0
+    vec = nothing
+    if typeof(buf[1]) == HeapBuffer
+        vals, vecs, info = eigsolve(
+            x -> central_product(x, P),
+            lambda,
+            1,
+            :SR;
+            ishermitian=true,
+            tol,
+            krylovdim=32,
+            maxiter=100,
+            verbosity=0,
+            eager=true,
+        )
+        eng = vals[1]
+        vec = vecs[1]
+    else
+        eng, vec, err = lanczos(
+            buffer_product,
+            lambda,
+            P.L0,
+            P.R0,
+            buf;
+            tol,
+            krylovdim=32,
+            maxiter=100,
+            verbosity=0)
+    end
     replaceind!(P.R0, dag(lind), rind)
 
-    return vals[1], vecs[1]
+    return eng, vec
 end
 #using Eq19 to approximate the left/right canoncial form
 function left_canonical_svd(psi0::MPS, S0::ITensor)

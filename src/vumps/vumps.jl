@@ -1,5 +1,5 @@
 #a poor man's vumps
-function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
+function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0)
     Nsite = length(mpo)
     site_inds = isiteinds(psi_left)
     lind_psi_l = setdiff(uniqueinds(psi_left[1], psi_left[2]), site_inds)[1]
@@ -39,8 +39,8 @@ function vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_ri
     replaceind!(S0, rind, dag(rind_p))
     replaceind!(S0, lind, dag(lind_p))
 end
-function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_canonical, left_to_right;
-    S0=nothing, expansion=true, ini_r=false, ini_l=false, err=0, outputlevel=0, gc_dim,
+function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_canonical, buf;
+    S0=nothing, expansion=true, ini_r=false, ini_l=false, err=0, outputlevel=1, gc_dim,
     kwargs...)
     #no need to find left/right canoncial form if the initial state is produc state
     #return mixed form psi
@@ -50,31 +50,30 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
     mpo.lpos = 0
     mpo.rpos = length(mpo) + 1
     psi_left, psi_right = vumps_canonical_form(vumps)
-    mpo_env!(psi_left, psi_right, S0, H_ini, mpo; kwargs..., ini_l, ini_r, outputlevel, gc_dim,
-        tol=max(1e-12, err))
+    mpo_env!(psi_left, psi_right, S0, H_ini, mpo, buf; ini_l, ini_r, outputlevel, gc_dim,
+        tol=max(1e-12, err), kwargs...)
     mpo.LR = Vector{ITensor}(undef, length(mpo))
-    vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0, left_to_right)
+    vumps_replaceinds!(mpo, psi_left, psi_right, psi, vumps, S0)
     # psi_left = nothing
     # psi_right = nothing
     return psi
 end
 function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim=10000,
     eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing, algorithm="vumps",
-    tol=(x -> max(1e-12, x / 100)), kwargs...)
+    buf=[DefaultBuffer(), DefaultBuffer()], tol=(x -> max(1e-12, x / 100)), kwargs...)
     #note, this method does not work for pure product state
     #using iDMRG to prepare initial state
+    solver_para = eig_para(1e-4, eigsolve_krylovdim, eigsolve_maxiter)
     if algorithm == "vumps"
         return vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, global_update, gc_dim,
-            eigsolve_krylovdim=30, eigsolve_maxiter=200, obs, write_when_maxdim_exceeds,
-            tol, kwargs...)
+            solver_para, obs, tol, buf, kwargs...)
     else
-        return vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, global_update, gc_dim,
-            eigsolve_krylovdim=30, eigsolve_maxiter=200, obs, write_when_maxdim_exceeds,
-            tol, kwargs...)
+        return vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer, env_dim, gc_dim,
+            solver_para, obs, write_when_maxdim_exceeds, tol, buf, kwargs...)
     end
 end
 function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim,
-    eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
+    solver_para, obs=nothing, buf,
     tol=(x -> max(1e-12, x / 100)), kwargs...)
     Nt = length(mpo)
     psi = ipsi.psi
@@ -83,7 +82,7 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
     S0 = ipsi.S0
     vumps = vumps_canonical(Nt)
     psi, err = vumps_canonical_form(psi, S0, vumps)
-    psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0,
+    psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, buf; S0, gc_dim,
         ini_r=true, ini_l=true, err=1e-12, env_dim)
 
     eng_density = 0
@@ -105,20 +104,18 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
         #nstep: number of local steps
         left_to_right = isodd(j)
         order = left_to_right ? (1:Nt) : (Nt:-1:1)
-        eng_tol = tol(err)
+        solver_para.tol = tol(err)
         @printf "Canoncial Error at step %i :%.2E\n" step err
         flush(stdout)
         for b in order
             step += 1
             #substract environment energy
-            eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
+            eng_c, S0 = central_site_problem(psi, mpo, solver_para.tol, buf, lambda=S0)
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng, psi, S0, err = solver(mpo, psi; step, vumps, left_to_right, S0,
-                poi=b, eigsolve_krylovdim,
-                eigsolve_maxiter,
+            eng, psi, err = solver(mpo, psi, buf; step, vumps, left_to_right,
+                poi=b,
+                solver_para,
                 observer=obs,
-                write_when_maxdim_exceeds,
-                eigsolve_tol=eng_tol,
                 kwargs...)
             #undo environment energy subtract in hamiltonian
             energyMPOSubtraction!(mpo, -eng_c / Nt)
@@ -134,7 +131,7 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
                     err = max(err, F)
                 end
             end
-            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), gc_dim)
+            psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, buf; S0, err=tol(err / 100), gc_dim)
         end
         # GC.gc(true)
         isdone && break
@@ -143,8 +140,8 @@ function vumps_sequential(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(
     ipsi.S0 = S0
     return ipsi
 end
-function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim,
-    eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing,
+function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, sweeps=2, observer=NoObserver(), env_dim=5, gc_dim,
+    solver_para, obs=nothing, write_when_maxdim_exceeds=nothing, buf,
     tol=(x -> max(1e-12, x / 100)), kwargs...)
     Nt = length(mpo)
     psi = ipsi.psi
@@ -153,7 +150,7 @@ function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(),
     S0 = ipsi.S0
     vumps = vumps_canonical(Nt)
     psi, err = vumps_canonical_form(psi, S0, vumps)
-    psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0,
+    psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, buf; S0, gc_dim,
         ini_r=true, ini_l=true, err=1e-12, env_dim)
 
     eng_density = 0
@@ -163,6 +160,9 @@ function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(),
     isdone = false
     if mpo.nsite != 1
         error("only support singe site version")
+    end
+    if isodd(sweeps)
+        sweeps += 1
     end
     solver = vumps_dmrg_parallel
     allowed_keys = (:bond_maxiter,)
@@ -174,31 +174,28 @@ function vumps_parallel(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(),
     for j in 1:nstep_max
         #nsteps = global step
         #nstep: number of local steps
-        left_to_right = isodd(j)
-        order = left_to_right ? (1:Nt) : (Nt:-1:1)
-        eng_tol = tol(err)
+        left_to_right = true #isodd(j)
+        solver_para.tol = tol(err)
         @printf "error and 1-F at step %i :%.2E %.2E\n" step err F
         flush(stdout)
         step += 1
         #substract environment energy
-        eng_c, S0 = central_site_problem(psi, mpo, lambda=S0)
-        #we could use S0 to replace C[1] or C[N+1] and psi[1] or psi[N]
+        eng_c, S0 = central_site_problem(psi, mpo, solver_para.tol, buf, lambda=S0)
         psi = vumps_update!(left_to_right, S0, psi, vumps)
         energyMPOSubtraction!(mpo, eng_c / Nt)
-        eng, psi, S0, err = solver(mpo, psi; step, vumps, left_to_right, S0,
-            eigsolve_krylovdim,
-            eigsolve_maxiter,
+        eng, psi, err = solver(mpo, psi, buf; step, vumps,
+            solver_para,
             observer=obs,
             write_when_maxdim_exceeds,
-            eigsolve_tol=eng_tol,
+            sweeps,
             kwargs...)
         #undo environment energy subtract in hamiltonian
         energyMPOSubtraction!(mpo, -eng_c / Nt)
-        isdone = checkdone!(observer; eng_density=eng / Nt, step=(0, step), psi, S0)
+        isdone = checkdone!(observer; eng_density=eng / Nt, step=(0, step), psi, S0) || j == nstep_max
         isdone && break
         #reinitialize the enviroment with updated psi_left and psi_right (global update)
         F = vumps_S_matrix_overlap(S0, vumps)
-        psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, true; S0, err=tol(err / 100), gc_dim)
+        psi = vumps_initializeIMPO!(psi, H_ini, mpo, vumps, buf; S0, err=tol(err / 100), gc_dim)
         # GC.gc(true)
     end
     ipsi.psi = psi

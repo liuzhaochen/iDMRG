@@ -10,8 +10,7 @@ function mpo_product(L, R, H, cache::lanczo_cache, c::ITensor, v)
         cache.Lv = L * H * dag(c) * prime(c)
     end
     try
-        # cache.LHv = contract!(cache.LHv, cache.Lv, H)
-        cache.LHv = contract!(cache.LHv, cache.Lv, v)
+        cache.LHv = conTract!(cache.LHv, cache.Lv, v)
     catch
         cache.LHv = cache.Lv * v
     end
@@ -23,13 +22,64 @@ function mpo_product(L, R, H, cache::lanczo_cache, v)
         cache.Lv = L * H
     end
     try
-        # cache.LHv = contract!(cache.LHv, cache.Lv, H)
-        cache.LHv = contract!(cache.LHv, cache.Lv, v)
+        cache.LHv = conTract!(cache.LHv, cache.Lv, v)
     catch
         cache.LHv = cache.Lv * v
     end
     v1 = noprime(cache.LHv * R)
     return v1
+end
+function bond_product(L, R, cache::lanczo_cache, v)
+    try
+        cache.Lv = conTract!(cache.Lv, L, v)
+    catch
+        cache.Lv = L * v
+    end
+    v2 = cache.Lv * R
+    return noprime(v2)
+end
+function mpo_product_2step(L, R, H, cache::lanczo_cache, v)
+    if cache.Lv == ITensor(1.0)
+        cache.Lv = L * H
+    end
+    try
+        cache.LHv = conTract!(cache.LHv, cache.Lv, v)
+    catch
+        cache.LHv = cache.Lv * v
+    end
+    v1 = noprime(cache.LHv * R)
+    return v1
+end
+function bond_product!(L, R, cache::lanczo_cache, v, v1)
+    try
+        cache.Lv = conTract!(cache.Lv, L, v)
+    catch
+        cache.Lv = L * v
+    end
+    v_tmp = v1
+    prime!(v_tmp)
+    # v2 = cache.Lv * R
+    v_tmp = conTract!(v_tmp, cache.Lv, R)
+    noprime!(v_tmp)
+    noprime!(v1)
+    return v_tmp
+end
+function mpo_product_2step!(L, R, H, cache::lanczo_cache, v, v1)
+    if cache.Lv == ITensor(1.0)
+        cache.Lv = L * H
+    end
+    try
+        cache.LHv = conTract!(cache.LHv, cache.Lv, v)
+    catch
+        cache.LHv = cache.Lv * v
+    end
+    # v = noprime(cache.LHv * R)
+    v_tmp = v1
+    prime!(v_tmp) #somehow, contract! fail to give correct result for LHv*R.
+    v_tmp = conTract!(v_tmp, cache.LHv, R)
+    noprime!(v1)
+    noprime!(v_tmp)
+    return v_tmp
 end
 function mpo_product(L, R, v)
     #using in-place version
@@ -114,8 +164,9 @@ function filter_kwargs(kws, allowed)
     # clean_kwargs = Dict(k => v for (k, v) in kws if k in allowed)
     return (; (k => kws[k] for k in keys(kws) if k in allowed)...)
 end
-function add!(A, B, c)
+function add!(A::ITensor, B::ITensor, c::Number)
     A .+= c .* B
+    return A
 end
 function jd_correction(f, theta, u0, x0)
     # x = x0

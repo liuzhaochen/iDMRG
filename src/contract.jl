@@ -1,6 +1,4 @@
 #
-using ITensors.NDTensors: BlockSparseTensor
-import ITensors.NDTensors
 
 
 function contraction_output(
@@ -45,6 +43,24 @@ function ITensors.NDTensors.contract!(
         # error("The contraction result doesn't match the input tensor: off_R = $off_R, off_R1 = $off_R1")
         R = reshape(R, off_R1, indsR)
     end
-    ITensors.NDTensors.contract!(R, labelsR, tensor1, labelstensor1, tensor2, labelstensor2, contraction_plan)
+    R = ITensors.NDTensors.contract!(R, labelsR, tensor1, labelstensor1, tensor2, labelstensor2, contraction_plan)
     return R
+end
+function conTract!(C::ITensor, A::ITensor, B::ITensor)
+    labelsR, labelsA, labelsB = ITensors.compute_contraction_labels(inds(C), inds(A), inds(B))
+    tensor1 = tensor(A)
+    tensor2 = tensor(B)
+    R = tensor(C)
+    off_R = ITensors.NDTensors.blockoffsets(R)
+    off_R1, contraction_plan, indsR = contraction_output(
+        tensor1, labelsA, tensor2, labelsB, labelsR
+    )
+
+    check = off_R == off_R1
+    if !check
+        R = reshape(R, off_R1, indsR)
+    end
+    R = ITensors.NDTensors.contract!(R, labelsR, tensor1, labelsA, tensor2, labelsB, contraction_plan)
+    ITensors.setstorage!(C, ITensors.storage(R))
+    return C
 end
