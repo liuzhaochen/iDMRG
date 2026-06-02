@@ -22,6 +22,7 @@ function dmrg3SRSVD(
     PH,
     psi0::MPS,
     sweeps::Sweeps;
+    buf=nothing,
     which_decomp=nothing,
     svd_alg=nothing,
     observer=NoObserver(),
@@ -63,6 +64,7 @@ function dmrg3SRSVD(
     spec = nothing
     Nexp = 0
     alg = "global_krylov"
+    solver_para = eig_para(eigsolve_tol, eigsolve_krylovdim, eigsolve_maxiter)
     for sw in 1:nsweep(sweeps)
         residual = 0.0
         sw_time = @elapsed begin
@@ -94,26 +96,25 @@ function dmrg3SRSVD(
                 L = lproj(PH)
                 R = rproj(PH)
                 ## allocate relevant tensor
-                cache = lanczo_cache()
                 H0 = PH.H[b]
                 ## using in-place contract! in mpo_product
-                vals, vecs, info = eigsolve(
-                    x -> mpo_product(L, R, H0, cache, x),
-                    # PH,
-                    phi,
-                    1,
-                    eigsolve_which_eigenvalue;
-                    ishermitian,
-                    tol=eigsolve_tol,
-                    krylovdim=eigsolve_krylovdim,
-                    maxiter=eigsolve_maxiter,
-                    verbosity=eigsolve_verbosity,
-                    eager=eigsolve_krylovdim > 5,
-                )
-                cache = nothing
-                residual = max(residual, info.normres[1])
-                energy = vals[1]
-                phi = vecs[1]
+                # vals, vecs, info = eigsolve(
+                #     x -> mpo_product(L, R, H0, cache, x),
+                #     # PH,
+                #     phi,
+                #     1,
+                #     eigsolve_which_eigenvalue;
+                #     ishermitian,
+                #     tol=eigsolve_tol,
+                #     krylovdim=eigsolve_krylovdim,
+                #     maxiter=eigsolve_maxiter,
+                #     verbosity=eigsolve_verbosity,
+                #     eager=eigsolve_krylovdim > 5,
+                # )
+                energy, phi, err = single_site_eig(phi, PH, buf; solver_para)
+                residual = max(residual, err)
+                # energy = vals[1]
+                # phi = vecs[1]
 
                 poi = b - 1
                 if left_to_right

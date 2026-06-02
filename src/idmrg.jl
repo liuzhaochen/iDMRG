@@ -98,12 +98,12 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
         for i in 1:nstep
             #solve the central site problem and update bond operator
             #higher accuracy 
-            eng_c, S0 = central_site_problem(psi, mpo, tol(err/10), buf, lambda=S0)
+            eng_c, S0 = central_site_problem(psi, mpo, tol(err / 10), buf, lambda=S0)
             # eng_c = 0
             #substract environment energy
             maxdim = maxdim_global[min(i, length(maxdim_global))]
             energyMPOSubtraction!(mpo, eng_c / Nt)
-            eng, psi = solver(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=tol(err),
+            eng, psi = solver(mpo, psi; buf, nsweeps, maxdim, cutoff, eigsolve_krylovdim, observer=obs, write_when_maxdim_exceeds, eigsolve_tol=tol(err),
                 kwargs...)
             # if i == 1
             #undo environment energy subtract in hamiltonian

@@ -22,41 +22,53 @@ function initialize(f!, x0::ITensor, K::Int)
     vec = Vector{ITensor}(undef, K + 1)
     alpha = zeros(K + 1)
     beta = zeros(K + 1)
-    x0 = copy(x0)
+    x0 = copy(x0) / norm(x0)
     lan = Lanczos(K, 0, vec, alpha, beta, ITensor(1.0))
     w = apply!(f!, x0)
     append!(lan, x0)
 
-    a0 = inner(x0, w)
+    α = inner(x0, w)
     lan.r = w
+    βold = norm(lan.r)
     # lan.r = copy!(lan.r, lan.x_tmp)
     # lan.r = add!(lan.r, x0, -a0)
-    lan.r .+= (-a0) .* x0
+    lan.r .+= (-α) .* x0
+    β = norm(lan.r)
+    while eps(one(β)) < β < 1 / sqrt(2) * βold
+        βold = β
+        dα = inner(x0, lan.r)
+        α += dα
+        lan.r .+= (-dα) .* x0  # should we use real(dα) here?
+        β = norm(lan.r)
+    end
 
-    lan.as[1] = real(a0)
-    lan.bs[1] = norm(lan.r)
+    lan.as[1] = real(α)
+    lan.bs[1] = β
     return lan
 end
 function orthogonalize(v, q)
-    nold = norm(v)
+    # nold = norm(v)
     s = inner(q, v)
     # v = add!(v, q, -s)
     v .+= -s .* q
     nnew = norm(v)
-    while eps(one(nnew)) < nnew < 1 / sqrt(2) * nold
-        nold = nnew
-        ds = inner(q, v)
-        # v = add!(v, q, -ds)
-        v .+= -ds .* q
-        s += ds
-        nnew = norm(v)
-    end
+    # while eps(one(nnew)) < nnew < 1 / sqrt(2) * nold
+    #     nold = nnew
+    #     ds = inner(q, v)
+    #     # v = add!(v, q, -ds)
+    #     v .+= -ds .* q
+    #     s += ds
+    #     nnew = norm(v)
+    # end
     return (v, s)
 end
 function expand!(f!, lan::Lanczos)
     #expand the lanzcos space
     #reuse the ram as much as possible
     beta = normres(lan)
+    if isnan(beta) || beta < 1e-12
+        @show lan.bs
+    end
     lan.r .*= 1 / beta
     # rescale!(lan.r, 1 / beta)
     append!(lan, lan.r) #this will make a copy if lan.V[end] is undef
@@ -64,6 +76,8 @@ function expand!(f!, lan::Lanczos)
     w = apply!(f!, lan.r)
     # w = add!(w, lan.V[lan.poi-1], -beta)
     w .+= -beta .* lan.V[lan.poi-1]
+
+
     v = lan.V[lan.poi]
     w, α = orthogonalize(w, v)
     ab2 = abs2(α) + abs2(beta)
@@ -294,7 +308,7 @@ function lanczos(f, x0::ITensor, LH::ITensor, R::ITensor, buf; tol=1e-10, maxite
             #move x0(buf1) to buf2
             copy(x0)
         end
-        if err < tol
+        if err < tol || i == maxiter
             x0 = move_to_heap(x0, buf[1])
             break
         end
@@ -315,7 +329,7 @@ function lanczos_onestep(f, x0::ITensor; tol=1e-10, verbosity=0, krylovdim=32)
     while true
         β = normres(lan)
         poi = length(lan)
-        if poi > 1
+        if poi > 0
             #diagonalize
             #this should be a symmetric vector as such the eigenvalue is already sorted
             T = SymTridiagonal(lan.as[1:poi], lan.bs[1:poi-1])
@@ -327,15 +341,13 @@ function lanczos_onestep(f, x0::ITensor; tol=1e-10, verbosity=0, krylovdim=32)
                 #construct result and return
                 lan.r .= 0
                 for i in 1:poi
-                    if U[i, 1] != 0
-                        lan.r .+= U[i, 1] .* lan.V[i]
-                        # add!(lan.x_tmp, lan.V[i], U[i, 1])
-                    end
+                    lan.r .+= U[i, 1] .* lan.V[i]
+                    # add!(lan.x_tmp, lan.V[i], U[i, 1])
                 end
                 if verbosity > 0
                     @show poi, numops, err
                 end
-                return theta, lan.r / norm(lan.r), err
+                return theta, lan.r, err
             end
         end
         if poi < lan.K
