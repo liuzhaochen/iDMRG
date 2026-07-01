@@ -24,6 +24,7 @@ include("iMPS.jl")
 include("canoncial_form.jl")
 include("observer.jl")
 include("dmrg3SRSVD.jl")
+include("dmrg2Site.jl")
 include("idmrg.jl")
 include("transfer_matrix.jl")
 
@@ -32,7 +33,7 @@ include("vumps/vumps_ini.jl")
 include("vumps/vumps_solver.jl")
 include("vumps/vumps.jl")
 include("contract.jl")
-
+include("gradient/main.jl")
 
 include("lanczos/lanczos.jl")
 include("solver/solver.jl")
