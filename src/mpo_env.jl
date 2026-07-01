@@ -211,7 +211,10 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     pmpo_sind = prime.(site_mpo)
     mpo_lind = setdiff(uniqueinds(mpo.H[1], mpo.H[2]), [dag(site_mpo[1]), pmpo_sind[1]])[1]
     mpo_rind = setdiff(uniqueinds(mpo.H[end], mpo.H[end-1]), [dag(site_mpo[end]), pmpo_sind[end]])[1]
-    bsizes = [buffer_size(buf[i]) for i in 1:2]
+    # bsizes = [buffer_size(buf[i]) for i in 1:2]
+    for i in 1:2
+        allocate_buffer!(buf[i])
+    end
     #################################################
     #
     #             Left Enviroment
@@ -281,7 +284,7 @@ function mpo_env!(psi_left::MPS, psi_right::MPS, S0::ITensor, H_ini::MPO, mpo::i
     replaceind!(L, prime(rind), dag(prime(lind)))
     mpo.R0 = L
     for i in 1:2
-        resize_buffer!(bsizes[i], buf[i])
+        free_buffer!(buf[i])
     end
     return nothing
 end

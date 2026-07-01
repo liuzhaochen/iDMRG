@@ -86,7 +86,11 @@ function vumps_dmrg(
         #as every time, the env is recalculated, no need to store every LR here
         PH = vumps_position!(PH, psi, b)
         # energy_A, phi, err = vumps_site_solve(PH, psi[b]; solver_para)
-        energy_A, phi, err = single_site_eig(psi[b], PH, buf; solver_para)
+
+        L = lproj(PH)
+        R = rproj(PH)
+        H0 = PH.H[PH.lpos+1]
+        energy_A, phi, err = single_site_eig(psi[b], L, R, H0, buf; solver_para)
         residual = max(residual, err)
         poi_l = b + dx
 
@@ -212,8 +216,7 @@ function vumps_dmrg_parallel(
                 L = lproj(PH)
                 R = rproj(PH)
                 H0 = PH.H[PH.lpos+1]
-                LH = L * H0
-                energy_A, phi, err = single_site_eig(phi, PH, buf; solver_para)
+                energy_A, phi, err = single_site_eig(phi, L, R, H0, buf; solver_para)
                 residual = max(err, residual)
                 poi_l = b + dx
                 energy0 = energy_A
