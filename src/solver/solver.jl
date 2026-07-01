@@ -8,3 +8,4 @@ mutable struct eig_para
     end
 end
 include("single_site_solver.jl")
+include("two_site_solver.jl")

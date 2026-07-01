@@ -111,7 +111,7 @@ function dmrg3SRSVD(
                 #     verbosity=eigsolve_verbosity,
                 #     eager=eigsolve_krylovdim > 5,
                 # )
-                energy, phi, err = single_site_eig(phi, PH, buf; solver_para)
+                energy, phi, err = single_site_eig(phi, L, R, H0, buf; solver_para)
                 residual = max(residual, err)
                 # energy = vals[1]
                 # phi = vecs[1]
@@ -166,9 +166,9 @@ function dmrg3SRSVD(
                 rand_ten = random_itensor(ind_cnew, w_ind, com_ind)
                 LR = nothing
                 if left_to_right
-                    LR = lproj(PH)
+                    LR = L #lproj(PH)
                 else
-                    LR = rproj(PH)
+                    LR = R #rproj(PH)
                 end
                 M = (LR * phi) * W
                 noprime!(M)

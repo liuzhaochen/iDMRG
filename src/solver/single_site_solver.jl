@@ -36,11 +36,13 @@ function fp_eq(phi, L, R, buf, solver_para)
         )
     end
 end
-function single_site_eig(phi, PH, buf; solver_para)
-    L = lproj(PH)
-    R = rproj(PH)
-    H0 = PH.H[PH.lpos+1]
-    LH = L * PH.H[PH.lpos+1]
+function single_site_eig(phi::ITensor, L::ITensor, R::ITensor, H0::ITensor, buf; solver_para)
+    # L = lproj(PH)
+    # R = rproj(PH)
+    # H0 = PH.H[PH.lpos+1]
+    LH = L * H0
+    #here, we create a new buffer and move LH, R into it
+    #and then free LH
     return fp_eq(phi, LH, R, buf, solver_para)
 end
 function vumps_bond_left_solve(i::Int, PH, psi_l::MPS, C, buf; solver_para)
@@ -75,7 +77,7 @@ function vumps_bond_right_solve(i::Int, PH, psi_r::MPS, C, buf; solver_para)
     phi = psi_r[i]
     #update R 
     R = (((R * phi) * H) * prime(dag(phi)))
-    return fp_eq(C, L, R, buf, solver_para)
+    return fp_eq(C, R, L, buf, solver_para)
     # l_cache = lanczo_cache()
     # vals, vecs, info = eigsolve(
     #     x -> bond_product(L, R, l_cache, x),
