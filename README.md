@@ -32,7 +32,7 @@ If you use this package in your research, please cite:
   author = {Liu, Zhaochen},
   title = {iDMRG.jl: A Julia Package for Infinite Density Matrix Renormalization Group},
   year = {2025},
-  url = {https://github.com/liuzhaochen/iDMRG.jl}
+  url = {https://github.com/liuzhaochen/iDMRG}
 }
 ```
 
