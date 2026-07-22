@@ -144,5 +144,6 @@ function dmrg2S(
         isdone = ITensorMPS.checkdone!(observer; energy, psi, sweep=sw, outputlevel)
         isdone && break
     end
+    disk_cleanup!(PH)
     return (energy, psi)
 end

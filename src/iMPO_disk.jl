@@ -72,3 +72,9 @@ function ITensorMPS.makeR!(P::DiskIMPO, psi::MPS, k::Int)
     end
     return P
 end
+
+function disk_cleanup!(P::iMPO)
+end
+function disk_cleanup!(P::DiskIMPO)
+    rm(P.LR.pathname, recursive=true)
+end

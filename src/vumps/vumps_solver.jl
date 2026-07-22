@@ -298,5 +298,6 @@ function vumps_dmrg_parallel(
         isdone = ITensorMPS.checkdone!(observer; energy=energy_A, psi, sweep=sw, outputlevel)
         isdone && iseven(sw) && break
     end
+    disk_cleanup!(PH)
     return (energy_A, psi, err)
 end
