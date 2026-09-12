@@ -82,6 +82,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
     isdone = false
     solver = mpo.nsite == 1 ? dmrg3SRSVD : dmrg2S
     allowed_keys = (:expansion, :eigsolve_maxiter, :alpha, :expansion_sweeps)
+    is_random = get(kwargs, :is_random, true)
     kwargs = filter_kwargs(kwargs, allowed_keys)
     for s in 1:nstep_max
         #nsteps = global step
@@ -95,6 +96,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
 
         @printf "======================================\n"
         @printf "iDMRG global step: %i\n" s
+        flush(stdout)
         for i in 1:nstep
             #solve the central site problem and update bond operator
             #higher accuracy 
@@ -132,7 +134,7 @@ function idmrg(ipsi::iMPS, mpo::iMPO; nstep_max, nsteps, nsweeps, maxdims, cutof
                 # overlap = lambdamodule(S0, S)
                 S0 = S
                 #for the case of product state, after swap, we apply one step of random gate to connect to sites
-                if s == 1 && i == 1
+                if s == 1 && i == 1 && is_random
                     psi = random_gate!(psi)
                 end
             end

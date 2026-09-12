@@ -8,7 +8,7 @@ mutable struct Lanczos
 end
 Base.length(A::Lanczos) = A.poi
 normres(A::Lanczos) = A.bs[A.poi]
-function append!(lan::Lanczos, x::ITensor)
+function Base.append!(lan::Lanczos, x::ITensor)
     i = lan.poi + 1
     lan.V[i] = x
     lan.poi += 1
@@ -84,7 +84,8 @@ function expand!(f!, lan::Lanczos, buf)
     #reuse the ram as much as possible
     beta = normres(lan)
     if !isfinite(beta) || beta < 1e-12
-        @show lan.bs
+        # @show lan.bs
+        return lan
     end
     if !isfinite(lan.as[lan.poi])
         @show lan.as
@@ -217,7 +218,7 @@ function lanczos_onestep(f, x0::ITensor; buf, tol=1e-10, verbosity=0, krylovdim=
             f_vals = abs(β * U[poi, 1])
             theta = D[1]
             err = f_vals
-            if err < tol || poi == lan.K #count == maxiter
+            if err < tol || poi == lan.K || β<1e-12 #count == maxiter
                 #construct result and return
                 v0 = U[poi, 1] * lan.V[poi]
                 for i in 1:poi-1

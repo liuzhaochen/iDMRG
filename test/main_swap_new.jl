@@ -7,6 +7,8 @@ using ITensorMPS
 using ITensorMPS: AbstractProjMPO
 using ITensorMPS: OneITensor
 using KrylovKit: eigsolve, schursolve, Arnoldi
+using Printf
+include("dmrg3SRSVD.jl")
 mutable struct myMPO <: AbstractProjMPO
     niter::Int
     lpos::Int
@@ -145,21 +147,6 @@ function swap_mps!(Lambda, Lambda_odd, sites_old, sites_new, psi, swap_poi::Int,
     @show error
     return psi
 end
-function central_product(v, delta_ten, P::myMPO)
-    Pv = P.L0 * v * delta_ten * P.R0
-    return noprime(Pv)
-end
-function mpo_env_linkinds(psi::MPS, P::myMPO)
-    N = P.nunitcell
-    ind_psi = collect(inds(psi[1]))
-    append!(ind_psi, dag.(prime.(ind_psi)))
-    lind = setdiff(inds(P.L0), ind_psi)[1]
-
-    ind_psi = collect(inds(psi[N]))
-    append!(ind_psi, dag.(prime.(ind_psi)))
-    rind = setdiff(inds(P.R0), ind_psi)[1]
-    return lind, rind
-end
 function new_site_inds(sites_odd)
     phy = string(collect(tags(sites_odd[1]))[1])
     N = length(sites_odd)
@@ -224,6 +211,10 @@ function insert_sites!(sites_odd, sites_new, poi_swap, psi::MPS, P::myMPO)
     mpo_link_rind = setdiff(inds(H_bulk[N]), [dag(sites_odd[N]), prime(sites_odd[N]), commonind(H_bulk[N],
         H_bulk[N-1])])[1]
     #swap
+    link_id = nothing
+    if N == 2
+        link_id = commonind(H_bulk[1],H_bulk[2])
+    end
     P.H = circshift(P.H, -poi_swap)
     #now modify the link indices make sure mpo can be connected
     replaceind!(P.H[N-poi_swap], mpo_link_rind, dag(mpo_link_lind))
@@ -232,11 +223,12 @@ function insert_sites!(sites_odd, sites_new, poi_swap, psi::MPS, P::myMPO)
         replaceind!(P.H[i], dag(sites_odd[i]), dag_site[i])
         replaceind!(P.H[i], prime(sites_odd[i]), prim_site[i])
     end
-    # new_lind = new_ind(mpo_link_rind)
-    # new_lind = settags(new_lind, tags(mpo_link_rind))
-    # replaceind!(H_bulk[N], mpo_link_rind, new_lind)
-    # lind0, rind0 = mpo_env_linkinds(psi, P)
-    # replaceind!(P.R0, rind0, dag(new_lind))
+    if N == 2
+        new_lind = new_ind(link_id)
+        new_lind = settags(new_lind, tags(link_id))
+        replaceind!(P.H[N], link_id, new_lind)
+        replaceind!(P.R0, rind0, dag(new_lind))
+    end
     #replace site inds
     P.lpos = 0
     P.rpos = N + 1
@@ -322,8 +314,8 @@ function isiteinds(psi)
     return unique(idx)
 end
 include("canonical_form.jl")
-function iMPO(H_bulk, Nuc::Int)
-    mpo = myMPO(0, 0, Nuc + 1, 2, Nuc, H_bulk,
+function iMPO(H_bulk, Nuc::Int; site=2)
+    mpo = myMPO(0, 0, Nuc + 1, site, Nuc, H_bulk,
         ITensor(1.0), ITensor(1.0), Vector{ITensor}(undef, Nuc))
     return mpo
 end
@@ -337,9 +329,12 @@ function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0=nothing)
         psi_left = left_canonical_svd(psi, S0)
         psi_right = right_canonical_svd(psi, S0)
 
-        Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
+        # Nx = initializeMPOLeft(psi_left, H_ini, mpo; nsweeps)
         #psi_left = Rinv*AAA*R
-        initializeMPORight(psi_right, H_ini, mpo; nsweeps)
+        # initializeMPORight(psi_right, H_ini, mpo; nsweeps)
+        left_test(psi_left, S0, H_ini, mpo)
+        right_test(psi_right, S0, H_ini, mpo)
+
         Nsite = length(mpo)
         lind_p = commonind(psi_left[Nsite], mpo.L0)
         rind_p = commonind(psi_right[1], mpo.R0)
@@ -357,7 +352,7 @@ function initializeIMPO(psi, H_ini, mpo::myMPO; nsweeps=10, S0=nothing)
     mpo.niter = 1
     mpo.lpos = 0
     mpo.rpos = length(mpo) + 1
-    return psi
+    return psi,S0
 end
 function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
     Nt = length(mpo)
@@ -366,24 +361,23 @@ function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
     #solve central site problem to get S0
     #for product state as initial state
     #the enviroment does not have links connect to mps
-    psi = initializeIMPO(psi, H_ini, mpo)
+    psi,_ = initializeIMPO(psi, H_ini, mpo)
     S0 = ITensor(1.0)
     # vals, S0 = central_site_problem(psi, mpo)
     eng_density = 0
     nstep = 50
     Nx = Nt
+    vals = 0
     #sometimes we may want to reinitialize the mpo
     len_glob = length(nsteps)
     for s in 1:len_glob
         #nsteps = global step
         nstep = nsteps[s]
         for i in 1:nstep
-            eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=20, eigsolve_maxiter=1)
+            eng, psi = dmrg(mpo, psi; nsweeps, maxdim, cutoff, eigsolve_krylovdim=10, eigsolve_maxiter=1)
             eng_density = eng / Nt
-            if i > 1
-                @show i, Nx
-                @show eng_density
-            end
+            @show s, i
+            @show eng_density
             if i == nstep
                 break
             end
@@ -405,14 +399,15 @@ function iDMRG(psi::MPS, mpo::myMPO; nsteps, nsweeps, maxdim, cutoff, H_ini)
                 Nx += Nt
             end
         end
-        # psi = imps_periodic_form(psi, S0)
         if s != len_glob
-            psi = initializeIMPO(psi, H_ini, mpo; nsweeps=100, S0=S0)
-            # vals, S0 = central_site_problem(psi, mpo;lambda=S0)
-            # @show vals
+            psi,S0 = initializeIMPO(psi, H_ini, mpo; nsweeps=100, S0=S0)
+            #solve the central site problem
+            # vals, S0 = central_site_problem(psi, mpo,lambda=S0)
+            # energyMPOSubtraction!(mpo, vals/Nt)
+            @show vals
         end
     end
-    return psi
+    return psi, S0
 end
 function lambdamodule(l1, l2)
     size1 = size(l1, 1)

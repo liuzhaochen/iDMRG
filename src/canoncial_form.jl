@@ -36,7 +36,7 @@ function central_site_problem(psi::MPS, P::iMPO, tol, buf; lambda=nothing)
     #make sure P.R0 and P.L0 share the same link index
     eng = 0
     vec = nothing
-    if typeof(buf[1]) == HeapBuffer
+    # if typeof(buf[1]) == HeapBuffer
         vals, vecs, info = eigsolve(
             x -> central_product(x, P),
             lambda,
@@ -51,18 +51,19 @@ function central_site_problem(psi::MPS, P::iMPO, tol, buf; lambda=nothing)
         )
         eng = vals[1]
         vec = vecs[1]
-    else
-        eng, vec, err = lanczos(
-            buffer_product,
-            lambda,
-            P.L0,
-            P.R0,
-            buf;
-            tol,
-            krylovdim=32,
-            maxiter=100,
-            verbosity=0)
-    end
+    # else
+    # something wrong may happen here
+    #     eng, vec, err = lanczos(
+    #         buffer_product,
+    #         lambda,
+    #         P.L0,
+    #         P.R0,
+    #         buf;
+    #         tol,
+    #         krylovdim=32,
+    #         maxiter=100,
+    #         verbosity=0)
+    # end
     replaceind!(P.R0, dag(lind), rind)
 
     return eng, vec

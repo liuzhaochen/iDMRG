@@ -126,7 +126,7 @@ function random_gate!(psi0::MPS)
     end
     return psi0
 end
-function random_ini!(psi0::MPS)
+function random_ini!(psi0::MPS;maxdim = 100)
     #apply a random gate to the position where psi0 is disconnected
     sites = isiteinds(psi0)
     N = length(psi0)
@@ -142,9 +142,12 @@ function random_ini!(psi0::MPS)
             #not perform qr to decouple AB
             linds = uniqueinds(psi0[i],psi0[i+1])
             ltags = "link,n=$i"
-            Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
-            psi0[i] = Q
-            psi0[i+1] = R
+            U, S, V, spec = svd(AB, linds; lefttags=ltags,
+                    maxdim,
+                )
+            # Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
+            psi0[i] = U
+            psi0[i+1] = S*V
         end
         for i in 2:2:N-1
             lind = commonind(psi0[i], psi0[i+1])
@@ -155,9 +158,37 @@ function random_ini!(psi0::MPS)
             #not perform qr to decouple AB
             linds = uniqueinds(psi0[i],psi0[i+1])
             ltags = "link,n=$i"
-            Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
-            psi0[i] = Q
-            psi0[i+1] = R
+            U, S, V, spec = svd(AB, linds; lefttags=ltags,
+                    maxdim,
+                )
+            # Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
+            psi0[i] = U
+            psi0[i+1] = S*V
+            # Q,R = factorize(AB, linds;tags=ltags, which_decomp="qr")
+            # psi0[i] = Q
+            # psi0[i+1] = R
+        end
+        for i in 1:N-2
+            ps = prime.(sites[i:i+2])
+            ps = Base.append!(ps, dag.(sites[i:i+2]))
+            g_total = random_itensor(ps)
+            psi_t = g_total
+            for j in i:i+2
+                psi_t *= psi0[j]
+            end
+            noprime!(psi_t)
+            for j in 1:2
+                id = i + j -1
+                linds = id == 1 ? commoninds(psi0[1], psi_t) : [commoninds(psi_t, psi0[id-1]), sites[id]]
+                ltags = "link,n=$id"
+                # Q,psi_t = factorize(psi_t, linds;tags=ltags, which_decomp="qr")
+                U, S, V, spec = svd(psi_t, linds; lefttags=ltags,
+                    maxdim,
+                )
+                psi0[id] = U
+                psi_t = S*V
+            end
+            psi0[i+2] = psi_t
         end
     end
     normalize!(psi0)

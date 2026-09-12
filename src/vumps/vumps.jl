@@ -59,7 +59,7 @@ function vumps_initializeIMPO!(psi::MPS, H_ini::MPO, mpo::iMPO, vumps::vumps_can
     return psi
 end
 function vumps(ipsi::iMPS, mpo::iMPO; nstep_max, observer=NoObserver(), env_dim=5, global_update=true, gc_dim=10000,
-    eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing, algorithm="vumps",
+    eigsolve_krylovdim=30, eigsolve_maxiter=200, obs=nothing, write_when_maxdim_exceeds=nothing, algorithm="vumps2",
     buf=[DefaultBuffer(), DefaultBuffer()], tol=(x -> max(1e-12, x / 100)), kwargs...)
     #note, this method does not work for pure product state
     #using iDMRG to prepare initial state

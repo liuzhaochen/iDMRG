@@ -95,7 +95,7 @@ function dmrg2S(
                     H1 = PH.H[b+1]
                     energy, phi, err = two_site_eig(phi, L, R, H0, H1, buf; solver_para)
                     residual = max(residual, err)
-                    target_dim = expansion ? maxdim(sweeps, sw) : psi_dim
+                    target_dim = expansion ? maxdim(sweeps, sw) : maxlinkdim(psi)
                     ortho = left_to_right ? "left" : "right"
                     spec = replacebond!(
                         PH,
